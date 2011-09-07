@@ -1,0 +1,52 @@
+# motoko config file
+
+# Version of Diablo II expected by Battle.net, e.g. 1.13
+VersionByte = 13
+
+# Hostname of the Battle.net server you want motoko to connect to
+Hostname = europe.battle.net
+
+# Port BNCS listens on
+BNCSPort = 6112
+
+# Port D2GS listens on
+D2GSPort = 4000
+
+# Your Diablo II Expansion CD key
+ExpansionKey = AAAAAAAAAAAAAAAA
+
+# Your Diablo II Classic CD key
+ClassicKey = BBBBBBBBBBBBBBBB
+
+# Stats of Game.exe that matches the latest version of Diablo II
+VersionInfo = Game.exe 04/16/10 21:14:42 61440
+
+# Owner of this CD key set which will be submitted to Battle.net
+Owner = motoko
+
+# Path to Diablo II's binaries (Game.exe, Bnclient.dll and D2Client.dll)
+BinaryDir = /path/to/binaries
+
+# Disconnect from BNCS after connecting to MCP (yes / no)
+BNCSDisconnect = yes
+
+# Disconnect from MCP after connecting to D2GS (yes / no)
+MCPDisconnect = no
+
+# Enables / disables the Warden client engine
+ResponseWarden = yes
+
+# Controls the amount of output (yes / no)
+Verbose = no
+
+# Enables / disables logging (yes / no)
+Logging = no
+
+# Time (seconds) to idle before reconnecting to Battle.net if connection dropped
+ReconnectDelay = 10
+
+# Plugins which contain any of the following strings (separated by ':') will not be loaded
+PluginBlacklist = ""
+
+# Enables / disables debug output (yes / no)
+Debug = no

@@ -1,0 +1,119 @@
+# plugin config file
+#
+# Disable: if added to a plugin's settings the according plugin will be enabled/disabled (options: yes, no)
+
+# plugin bncs login
+
+<Plugin type=nested>
+	Name = libbncs_login_plugin.so
+	Account = account
+	Password = password
+	Realm = Europe
+</Plugin>
+
+# plugin mcp login
+
+<Plugin type=nested>
+	Name = libmcp_login_plugin.so
+	Character = character
+</Plugin>
+
+# plugin mcp game
+#
+# LobbyIdleTime: specifies how long to idle in lobby before creating next game (seconds)
+# GameNamePass: sets name and password to use (options: random, 'name'/'password')
+
+<Plugin type=nested>
+	Name = libmcp_game_plugin.so
+	Difficulty = Hell
+	LobbyIdleTime = 15
+	GameNamePass = game/pass
+</Plugin>
+
+# plugin chicken
+#
+# HPPotionLimit: specifies when to use a healing pot
+# HPChickenLImit: specifies when to chicken due to health level
+# MPPotionLimit: specifies when to use a mana pot
+# MPChickenLimit: specifies when to chicken due to mana level
+
+<Plugin type=nested>
+	Name = libd2gs_chicken_plugin.so
+	HPPotionLimit = 600
+	HPChickenLimit = 400
+	MPPotionLimit = 150
+	MPChickenLimit = 50
+</Plugin>
+
+# plugin pickit
+#
+# define items to pickup by creating a <Item></Item> entry
+# possible attributes:
+#  Code: item code
+#  Quality: item quality (options: set, unique, other, normal, magic, rare, superior)
+#  Ethereal: ethereal flag (options: yes, no)
+#  Level: item level
+
+<Plugin type=nested>
+	Name = libd2gs_pickit_plugin.so
+	<Item type=nested>
+		Code = rin
+		Quality = unique
+	</Item>
+	<Item type=nested>
+		Code = r31
+	</Item>
+	<Item type=nested>
+		Code = r32
+	</Item>
+	<Item type=nested>
+		Code = urn
+		Quality = unique
+	</Item>
+	<Item type=nested>
+		Quality = unique
+	</Item>
+</Plugin>
+
+# plugin pes
+# 
+# CastDelay: specifies how long to idle after casting a spell (milliseconds)
+# MaxSequencesPerMonster: upper limit for attacking a monster with the specified sequence
+# PrecastSequence: buff sequence that gets executed when leaving town (syntax as for AttackSequence)
+# AttackSequence: attack sequence that gets executed for every monster encountered
+#  syntax: single actions are separated by '/', arguments and actions are separated by ':'
+#  options:
+#    switch (): switch weapon slot
+#    self (spell): cast spell at character
+#    left (spell): set left skill to spell and cast at monster
+#    right (spell): set right skill to spell and cast at monster
+# SkipMods: monsters with specified mods (separated by ':') will be skipped (options: light, lightning, stoneskin, cursed, ...)
+# ShopAfterRuns: after the defined number of runs the character will spend time shopping
+
+<Plugin type=nested>
+	Name = libd2gs_pes_plugin.so
+	RunPindleskin = yes
+	RunEldritch = yes
+	RunShenk = no
+	UseMerc = yes
+	CastDelay = 250
+	MaxSequencesPerMonster = 10
+	PrecastSequence = "switch/self:Shiver Armor/switch"
+	AttackSequence = "left:Lightning/right:Chain Lightning"
+	SkipMods = "light:lightning"
+	ShopAfterRuns = 2
+</Plugin>
+
+# plugin dclone
+# 
+# GameIdleTime: if hitting a cold IP idle for the specified amount (seconds)
+# HotIPs: list of hot IPs to hunt (last octet, leading '.', separated by ':')
+#
+# NOTE: if hitting a hot IP the character will idle in game as long as another character joins and says '.continue' in chat
+
+<Plugin type=nested>
+	Name = libd2gs_dclone_plugin.so
+	Disabled = yes
+	GameIdleTime = 15
+	HotIPs = ".34:.56:.126"
+</Plugin>
