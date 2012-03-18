@@ -1601,6 +1601,13 @@ _export bool module_load_config(struct setting_section *s) {
 					list_add(&setting_cleaners, &sc);
 				}
 			}*/
+			if (s->settings[i].type == INTEGER && set->type == INTEGER) {
+				set->i_var = s->settings[i].i_var;
+			} else if (s->settings[i].type == STRING) {
+				if (set->type == INTEGER) {
+					sscanf(s->settings[i].s_var, "%li", &set->i_var);
+				}
+			}
 		}
 	}
 	return TRUE;

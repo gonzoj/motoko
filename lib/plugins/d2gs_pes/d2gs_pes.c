@@ -57,10 +57,11 @@ static struct setting module_settings[] = (struct setting []) {
 	SETTING("UseMerc", FALSE, BOOLEAN),
 	SETTING("CastDelay", 0, INTEGER),
 	SETTING("MaxSequencesPerMonster", 0, INTEGER),
-	SETTING("ShopAfterRuns", 1, INTEGER)
+	SETTING("ShopAfterRuns", 1, INTEGER),
+	SETTING("RepairAfterRuns", 1, INTEGER)
 };
 
-static struct list module_settings_list = LIST(module_settings, struct setting, 7);
+static struct list module_settings_list = LIST(module_settings, struct setting, 8);
 
 #define module_setting(name) ((struct setting *)list_find(&module_settings_list, (comparator_t) compare_setting, name))
 
@@ -509,7 +510,7 @@ bool npc_shop(char *s_npc) {
 		if (npc_interact(npc)) {
 			plugin_print("pes", "healing at %s\n", npc_lookup_name(npc));
 
-			if ((runs % module_setting("ShopAfterRuns")->i_var) || !scrolls) {
+			if ((module_setting("ShopAfterRuns")->i_var && !(runs % module_setting("ShopAfterRuns")->i_var)) || !scrolls) {
 				plugin_print("pes", "shopping at %s\n", npc_lookup_name(npc));
 
 				int j = scrolls;
@@ -543,6 +544,37 @@ bool npc_shop(char *s_npc) {
 	}
 
 	//pthread_cleanup_pop(1);
+
+	return s;
+}
+
+bool npc_repair(char *s_npc) {
+	bool s;
+
+	npc_refresh();
+
+	npc_t *npc = list_find(&npcs, (comparator_t) npc_compare_name, s_npc);
+	if (npc) {
+		if (npc_interact(npc)) {
+			plugin_print("pes", "repairing equipment at %s\n", npc_lookup_name(npc));
+
+			d2gs_send(0x35, "%d 00 00 00 00 00 00 00 00 00 00 00 80", npc->object.id);
+
+			msleep(200);
+
+			s = TRUE;
+		} else {
+			plugin_print("pes", "failed to repair at %s\n", npc_lookup_name(npc));
+
+			s = FALSE;
+		}
+
+		d2gs_send(0x30, "01 00 00 00 %d", npc->object.id);
+	} else {
+		plugin_debug("pes", "couldn't find %s\n", s_npc);
+
+		s = FALSE;
+	}
 
 	return s;
 }
@@ -1144,6 +1176,21 @@ _export void * module_thread(void *unused) {
 
 	time(&run_start);
 	plugin_print("pes", "starting P/E/S run %i\n", ++runs);
+
+	// move to larzuk and repair equipment
+	if (module_setting("RepairAfterRuns")->i_var && !(runs % module_setting("RepairAfterRuns")->i_var)) {
+		moveto(5106, 5045);
+		moveto(5124, 5040);
+		moveto(5144, 5044);
+
+		npc_repair("Larzuk");
+
+		// move back to spawn
+		moveto(5144, 5044);
+		moveto(5124, 5040);
+		moveto(5106, 5045);
+		moveto(5098, 5018);
+	}
 
 	// move to malah and heal / shop
 	moveto(5089, 5029);
