@@ -111,6 +111,7 @@ void wardenc_load_signatures(char *dir) {
 	char *file = strconcat(dir, "wrequest.db");
 	FILE *f = fopen(file, "r");
 	if (!f) {
+		logmessage("error: failed to load database %s\n", file);
 		free(file);
 		return;
 	}

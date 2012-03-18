@@ -339,7 +339,9 @@ void load_modules(const char *moddir) {
 	closedir(modules);
 
 	print("loading plugin.conf... \n");
-	config_load_settings("plugin.conf", load_module_config);
+	if (!config_load_settings("plugin.conf", load_module_config)) {
+		print("warning: failed to load plugin.conf (plugins will fall back to default values)\n");
+	}
 
 	init_modules();
 }

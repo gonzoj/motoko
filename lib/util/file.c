@@ -125,10 +125,10 @@ size_t file_dump(const char *file, char *format, ...) {
 size_t file_copy(const char *file, const char *copy) {
 	int fd;
 	size_t size = file_get_size(file);
-	if (size > 0) {
+	if ((int) size > 0) {
 		byte *buf = malloc(size);
 		size_t read = file_read(file, buf, size);
-		if (read > 0) {
+		if ((int) read > 0) {
 			size = file_write(copy, buf, read);
 		} else {
 			size = -1;

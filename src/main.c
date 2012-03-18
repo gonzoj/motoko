@@ -127,51 +127,55 @@ static bool create_appdata() {
 	if (home) {
 		if (!chdir(home)) {
 			int status = FALSE;
-			if (chdir(".motoko")) {
-				printf(".motoko doesn't exist, creating directory structure... ");
+			struct stat buf;
+
+			if (stat(".motoko", &buf)) {
+				printf(".motoko doesn't exist, creating directory structure...\n");
+				printf("creating directories... ");
 				status |= mkdir(".motoko", S_IRWXU);
 				status |= mkdir(".motoko/profiles", S_IRWXU);
 				status |= mkdir(".motoko/profiles/default", S_IRWXU);
 				status |= mkdir(".motoko/warden", S_IRWXU);
-				status |= chdir(".motoko");
-				printf(status ? "failed." : "done.");
-			}
-			if (!status) {
-				if (chdir("warden")) {
-					status |= mkdir("warden", S_IRWXU);
-					if (status) {
-						printf("failed to create directory for the warden client engine.");
-					}
-				}
-				status |= chdir("..");
-				if (!status && chdir("profiles")) {
-					status |= mkdir("profiles", S_IRWXU);
-					status |= mkdir("profiles/default", S_IRWXU);
-					status |= chdir("profiles/default");
-					if (!status) {
-						char *binconf, *modconf;
-						string_new(&binconf, data_p, "/motoko.conf.default", "");
-						string_new(&modconf, data_p, "/plugin.conf.default", "");
+				status |= mkdir(".motoko/warden/modules", S_IRWXU);
+				printf("%s\n", status ? "failed" : "done");
 
-						printf("copying %s...\n", binconf);
-						status |= file_copy(binconf, "motoko.conf") < 0 ? TRUE
-								: FALSE;
-						printf("copying %s...\n", modconf);
-						status |= file_copy(modconf, "plugin.conf") < 0 ? TRUE
-								: FALSE;
+				if (!status) {
+					char *binconf, *modconf, *warconf;
+					string_new(&binconf, data_p, "/motoko/motoko.conf.default", "");
+					string_new(&modconf, data_p, "/motoko/plugin.conf.default", "");
+					string_new(&warconf, data_p, "/motoko/wrequest.db.default", "");
+				
+					printf("copying motoko.conf... ");
+					status |= (int) file_copy(binconf, ".motoko/profiles/default/motoko.conf") < 0 ? -1 : 0;
+					printf("%s\n", status ? "failed" : "done");
+					printf("copying plugin.conf... ");
+					status |= (int) file_copy(modconf, ".motoko/profiles/default/plugin.conf") < 0 ? -1 : 0;
+					printf("%s\n", status ? "failed" : "done");
+					printf("copying wrequest.db... ");
+					status |= (int) file_copy(warconf, ".motoko/warden/wrequest.db") < 0 ? -1 : 0;
+					printf("%s\n", status ? "failed" : "done");
 
-						free(binconf);
-						free(modconf);
-					}
-					if (status) {
-						printf("failed to create the profile 'default'.\n");
-					}
+					free(binconf);
+					free(modconf);
+					free(warconf);
 				}
-				return !status;
+
+				if (status) {
+					printf("failed to create .motoko. program exits.\n");
+				} else {
+					printf("successfully created .motoko. please edit the configuration files. program exits.\n");
+				}
+			} else {
+				return FALSE;
 			}
+		} else {
+			printf("could not access %s. program exits.\n", home);
 		}
+	} else {
+		printf("could not retrieve $HOME. program exits.\n");
 	}
-	return FALSE;
+
+	return TRUE;
 }
 
 static void dump_settings() {
@@ -272,8 +276,7 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	if (!create_appdata()) {
-		printf(".motoko corrupted. program exits.\n");
+	if (create_appdata()) {
 		exit(EXIT_FAILURE);
 	}
 
