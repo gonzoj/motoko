@@ -595,8 +595,8 @@ void dump_room_layout_simple(room_layout_t *layout, struct list *tiles) {
 }
 
 void dump_tiles(struct list *tiles) {
-	ui_console_lock();
 	pthread_mutex_lock(&tiles_m);
+	ui_console_lock();
 	plugin_print("pathing", "tile layout (%i tile(s)):\n", list_size(tiles));
 	room_layout_t layout = (room_layout_t) { { { 0 } }, { 0, 0 }, 0, 0, 0 };
 	if (setting("Debug")->b_var) print("\n");
@@ -620,8 +620,8 @@ void dump_tiles(struct list *tiles) {
 	print("\n");
 	dump_room_layout_simple(&layout, tiles);
 	print("\n");
-	pthread_mutex_unlock(&tiles_m);
 	ui_console_unlock();
+	pthread_mutex_unlock(&tiles_m);
 }
 
 void update_adjacent_tiles(struct list *tiles) {

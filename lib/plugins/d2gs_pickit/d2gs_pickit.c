@@ -68,6 +68,7 @@ typedef struct {
 	byte level;
 	dword id;
 	bool ethereal;
+	dword amount;
 	int distance; // test pickit
 } item_t;
 
@@ -75,6 +76,9 @@ typedef struct {
 
 struct list items;
 struct list valuable = LIST(NULL, item_t, 0); // must init here because load_config is called before init
+struct list nolog = LIST(NULL, char[4], 0);
+
+dword gold;
 
 pthread_mutex_t items_m;
 
@@ -106,6 +110,10 @@ void item_dump(item_t *i) {
 		sprintf(level, "%i", i->level);
 	}
 	char *ethereal = (i->ethereal & UNSPECIFIED) == UNSPECIFIED ? "UNSPECIFIED" : (i->ethereal ? "yes" : "no");
+	char *amount = "UNSPECIFIED";
+	if (i->amount != (UNSPECIFIED | (UNSPECIFIED << 8) | (UNSPECIFIED << 16) | (UNSPECIFIED << 24))) {
+		sprintf(amount, "%i", i->amount);
+	}
 
 	ui_console_lock();
 
@@ -114,6 +122,7 @@ void item_dump(item_t *i) {
 	plugin_print("pickit", "code:        %s\n", code);
 	plugin_print("pickit", "level:       %s\n", level);
 	plugin_print("pickit", "ethereal:    %s\n", ethereal);
+	plugin_print("pickit", "amount:      %i\n", amount);
 	plugin_print("pickit", "\n");
 
 	ui_console_unlock();
@@ -129,6 +138,18 @@ const char * lookup_item(item_t *i) {
 	}
 
 	return "";
+}
+
+bool is_blocked(item_t *i) {
+	struct iterator it = list_iterator(&nolog);
+	char *j;
+
+	while ((j = iterator_next(&it))) {
+		if (!strcmp(j, i->code)) {
+			return TRUE;
+		}
+	}
+	return FALSE;
 }
 
 void logitem(const char *format, ...) {
@@ -172,6 +193,7 @@ void logitem(const char *format, ...) {
 
 int d2gs_item_action(void *);
 int d2gs_char_location_update(void *);
+int d2gs_gold_update(void *);
 //int internal_trigger_pickit(void *);
 void pickit_routine();
 
@@ -204,14 +226,23 @@ _export bool module_load_config(struct setting_section *s) {
 		return TRUE;
 	}
 
+	bool log_item = TRUE;
+
 	item_t item;
 	memset(&item, UNSPECIFIED, sizeof(item_t));
 
 	int i;
 
 	for (i = 0; i < s->entries; i++) {
+		if (!strcmp(s->settings[i].name, "Log")) {
+			if (!strcmp(string_to_lower_case(s->settings[i].s_var), "no")) {
+				log_item = FALSE;
+			}
+		}	
+
 		if (!strcmp(s->settings[i].name, "Code")) {
-			strncpy(item.code, string_to_lower_case(s->settings[i].s_var), 4);
+			strncpy(item.code, string_to_lower_case(s->settings[i].s_var), 3);
+			item.code[3] = '\0';
 		}
 
 		if (!strcmp(s->settings[i].name, "Quality")) {
@@ -252,9 +283,17 @@ _export bool module_load_config(struct setting_section *s) {
 		if (!strcmp(s->settings[i].name, "Level")) {
 			sscanf(s->settings[i].s_var, "%c", &item.level);
 		}
+
+		if (!strcmp(s->settings[i].name, "Amount")) {
+			sscanf(s->settings[i].s_var, "%i", &item.amount);
+		}
 	}
 
 	list_add(&valuable, &item);
+
+	if (!log_item && (*item.code & UNSPECIFIED) != UNSPECIFIED) {
+		list_add(&nolog, &item.code);
+	}
 
 	return TRUE;
 }
@@ -266,9 +305,17 @@ _export bool module_init() {
 	register_packet_handler(D2GS_RECEIVED, 0x95, d2gs_char_location_update);
 	register_packet_handler(D2GS_SENT, 0x0c, d2gs_char_location_update);
 
+	register_packet_handler(D2GS_RECEIVED, 0x19, d2gs_gold_update);
+	register_packet_handler(D2GS_RECEIVED, 0x1d, d2gs_gold_update);
+	register_packet_handler(D2GS_RECEIVED, 0x1e, d2gs_gold_update);
+	register_packet_handler(D2GS_RECEIVED, 0x1f, d2gs_gold_update);
+	//register_packet_handler(D2GS_RECEIVED, 0x20, d2gs_gold_update);
+
 	//register_packet_handler(INTERNAL, 0x9c, internal_trigger_pickit);
 
 	items  = list_new(item_t);
+
+	gold = 0;
 
 	pthread_mutex_init(&items_m, NULL);
 
@@ -284,10 +331,17 @@ _export bool module_finit() {
 	unregister_packet_handler(D2GS_RECEIVED, 0x95, d2gs_char_location_update);
 	unregister_packet_handler(D2GS_SENT, 0x0c, d2gs_char_location_update);
 
+	unregister_packet_handler(D2GS_RECEIVED, 0x19, d2gs_gold_update);
+	unregister_packet_handler(D2GS_RECEIVED, 0x1d, d2gs_gold_update);
+	unregister_packet_handler(D2GS_RECEIVED, 0x1e, d2gs_gold_update);
+	unregister_packet_handler(D2GS_RECEIVED, 0x1f, d2gs_gold_update);
+	//unregister_packet_handler(D2GS_RECEIVED, 0x20, d2gs_gold_update);
+
 	//unregister_packet_handler(INTERNAL, 0x9c, internal_trigger_pickit);
 	
 	list_clear(&items);
 	list_clear(&valuable);
+	list_clear(&nolog);
 
 	pthread_mutex_destroy(&items_m);
 
@@ -308,17 +362,22 @@ _export void module_cleanup() {
 	
 	while ((i = iterator_next(&it))) {
 
-		logitem("failed to pick ");
-		if (i->ethereal) logitem("ethereal ");
-		if (i->quality != 0x00) logitem("%s ", qualities[i->quality]);
-		logitem("%s", lookup_item(i));
-		if (i->quality != 0x00) logitem(" (%i)", i->level);
-		if (setting("Debug")->b_var) logitem(" distance: %i", i->distance); // test pickit
-		logitem("\n");
+		if (!is_blocked(i)) {
+			logitem("failed to pick ");
+			if (i->amount > 1) logitem("%i ", i->amount);
+			if (i->ethereal) logitem("ethereal ");
+			if (i->quality != 0x00) logitem("%s ", qualities[i->quality]);
+			logitem("%s", lookup_item(i));
+			if (i->quality != 0x00) logitem(" (%i)", i->level);
+			if (setting("Debug")->b_var) logitem(" distance: %i", i->distance); // test pickit
+			logitem("\n");
+		}
 
 	}
 
 	list_clear(&items);
+
+	gold = 0;
 
 	routine_scheduled = FALSE;
 }
@@ -341,6 +400,16 @@ item_t * item_new(d2gs_packet_t *packet, item_t *new) {
 		dword bits = net_extract_bits(packet->data, 133, 32);
 		memcpy(new->code, &bits, 3);
 
+		if (!strcmp(new->code, "gld")) {
+			if (net_extract_bits(packet->data, 165, 1)) {
+				new->amount = net_extract_bits(packet->data, 166, 32);
+			} else {
+				new->amount = net_extract_bits(packet->data, 166, 12);
+			}
+		} else {
+			new->amount = 1;
+		}
+
 	} else {
 		new->location.x = net_extract_bits(packet->data, 105, 4);
 		new->location.y = net_extract_bits(packet->data, 109, 3);
@@ -350,10 +419,21 @@ item_t * item_new(d2gs_packet_t *packet, item_t *new) {
 		dword bits = net_extract_bits(packet->data, 116, 32);
 		memcpy(new->code, &bits, 3);
 
+		if (!strcmp(new->code, "gld")) {
+			if (net_extract_bits(packet->data, 148, 1)) {
+				new->amount = net_extract_bits(packet->data, 149, 32);
+			} else {
+				new->amount = net_extract_bits(packet->data, 149, 12);
+			}
+		} else {
+			new->amount = 1;
+		}
+
 	}
 	
 	if (net_extract_bits(packet->data, 77, 1)) { 
 		new->quality = 0x00;
+		new->level = 0;
 	} else {
 		if (strcmp(new->code, "gld")) {
 			if (new->destination == 0x03) {
@@ -361,14 +441,42 @@ item_t * item_new(d2gs_packet_t *packet, item_t *new) {
 			} else {
 				new->quality = net_extract_bits(packet->data, 158, 4);
 			}
-		}
-	}
-	
-	if (strcmp(new->code, "gld")) { //new->level = net_extract_bits(packet->data, 168, 7);
-		if (new->destination == 0x03) {
-			new->level = net_extract_bits(packet->data, 168, 7);
 		} else {
-			new->level = net_extract_bits(packet->data, 151, 7);
+			if (new->destination == 0x03) {
+				if (net_extract_bits(packet->data, 165, 1)) {
+					new->quality = net_extract_bits(packet->data, 208, 4);
+				} else {
+					new->quality = net_extract_bits(packet->data, 188, 4);
+				}
+			} else {
+				if (net_extract_bits(packet->data, 148, 1)) {
+					new->quality = net_extract_bits(packet->data, 191, 4);
+				} else {
+					new->quality = net_extract_bits(packet->data, 171, 4);
+				}
+			}
+		}
+	
+		if (strcmp(new->code, "gld")) { //new->level = net_extract_bits(packet->data, 168, 7);
+			if (new->destination == 0x03) {
+				new->level = net_extract_bits(packet->data, 168, 7);
+			} else {
+				new->level = net_extract_bits(packet->data, 151, 7);
+			}
+		} else {
+			if (new->destination == 0x03) {
+				if (net_extract_bits(packet->data, 165, 1)) {
+					new->level = net_extract_bits(packet->data, 201, 7);
+				} else {
+					new->level = net_extract_bits(packet->data, 181, 7);
+				}
+			} else {
+				if (net_extract_bits(packet->data, 148, 1)) {
+					new->level = net_extract_bits(packet->data, 184, 7);
+				} else {
+					new->level = net_extract_bits(packet->data, 164, 7);
+				}
+			}
 		}
 	}
 
@@ -391,6 +499,10 @@ bool item_is_valuable(item_t *i, item_t *j) {
 	}
 
 	if ((j->ethereal & UNSPECIFIED) != UNSPECIFIED && i->ethereal != j->ethereal) {
+		return FALSE;
+	}
+
+	if (j->amount != (UNSPECIFIED | (UNSPECIFIED << 8) | (UNSPECIFIED << 16) | (UNSPECIFIED << 24)) && i->amount < j->amount) {
 		return FALSE;
 	}
 
@@ -419,7 +531,9 @@ bool item_evaluate(item_t *i) {
 
 			pthread_mutex_unlock(&items_m);
 
-			n_attempts++;
+			if (!is_blocked(i)) {
+				n_attempts++;
+			}
 
 			return TRUE;
 		}
@@ -442,33 +556,37 @@ int d2gs_item_action(void *p) {
 
 		ui_console_lock();
 		
-		plugin_print("pickit", "%s%s%s%s ", i.ethereal ? "ethereal " : "", i.quality == 0x00 ? "" : qualities[i.quality], i.quality == 0x00 ? "" : " ", lookup_item(&i));
+		char amount[32];
+		sprintf(amount, "%i ", i.amount);
+		plugin_print("pickit", "%s%s%s%s%s ", i.amount > 1 ? amount : "", i.ethereal ? "ethereal " : "", i.quality == 0x00 ? "" : qualities[i.quality], i.quality == 0x00 ? "" : " ", lookup_item(&i));
 		if (i.quality != 0x00) print("(%i) ", i.level);
 		print("dropped\n");
 
+		ui_console_unlock();
+
 		if (item_evaluate(&i)) {
-			ui_console_unlock();
 
 			d2gs_send(0x16, "04 00 00 00 %d 00 00 00 00", i.id);
-		} else {
-			ui_console_unlock();
 		}
-
 	} else if (i.action == 0x04 && i.container == 0x02) { // item added to inventory
 
 		item_t *j = list_find(&items, (comparator_t) item_compare, &i);
 		
 		if (j) {
 
-			n_picked++;
+			if (!is_blocked(j)) {
 
-			logitem("picked ");
-			if (j->ethereal) logitem("ethereal ");
-			if (j->quality != 0x00) logitem("%s ", qualities[j->quality]);
-			logitem("%s", lookup_item(j));
-			if (j->quality != 0x00) logitem(" (%i)", j->level);
-			if (setting("Debug")->b_var) logitem(" distance: %i", j->distance); // test pickit
-			logitem("\n");
+				n_picked++;
+
+				logitem("picked ");
+				if (j->amount > 1) logitem("%i ", j->amount);
+				if (j->ethereal) logitem("ethereal ");
+				if (j->quality != 0x00) logitem("%s ", qualities[j->quality]);
+				logitem("%s", lookup_item(j));
+				if (j->quality != 0x00) logitem(" (%i)", j->level);
+				if (setting("Debug")->b_var) logitem(" distance: %i", j->distance); // test pickit
+				logitem("\n");
+			}
 
 			pthread_mutex_lock(&items_m);
 
@@ -516,6 +634,73 @@ int d2gs_char_location_update(void *p) {
 	return FORWARD_PACKET;
 }
 
+int gold_compare(item_t *i, int *a) {
+	return (!strcmp(i->code, "gld") && i->amount == *a);
+}
+
+int d2gs_gold_update(void *p) {
+	d2gs_packet_t *packet = D2GS_CAST(p);
+
+	if (packet->id != 0x19 && net_get_data(packet->data, 0, byte) != 0x0e) return FORWARD_PACKET;
+
+	int amount = 0;
+
+	switch(packet->id) {
+		case 0x19: {
+			amount = net_get_data(packet->data, 0, byte);
+		}
+		break;
+
+		case 0x1d: {
+			amount = net_get_data(packet->data, 1, byte) - gold;
+		}
+		break;
+
+		case 0x1e: {
+			amount = net_get_data(packet->data, 1, word) - gold;
+		}
+		break;
+
+		case 0x1f: {
+			amount = net_get_data(packet->data, 1, dword) - gold;
+		}
+		break;
+	}
+
+	/*
+	 * this isn't 100% accurate:
+	 * in some cases the server sends _one_ update for _several_ gold picks
+	 * the search won't find a matchig gold amount in items and the item won't be removed
+	 * this leads to "failed to pick ..." messages in the log
+	 */
+	if (amount > 0) {
+		item_t *i = list_find(&items, (comparator_t) gold_compare, &amount);
+		if (i) {
+
+			if (!is_blocked(i)) {
+
+				n_picked++;
+
+				logitem("picked %i Gold", i->amount);
+				if (setting("Debug")->b_var) logitem(" distance: %i", i->distance); // test pickit
+				logitem("\n");
+			}
+
+			pthread_mutex_lock(&items_m);
+
+			list_remove(&items, i);
+
+			pthread_mutex_unlock(&items_m);
+		}
+	}
+
+	gold += amount;
+
+	plugin_debug("pickit", "%i gold in inventory (%02x)\n", gold, packet->id);
+
+	return FORWARD_PACKET;
+}
+
 /*int internal_trigger_pickit(void *p) {
 	internal_packet_t *packet = INTERNAL_CAST(p);
 
@@ -543,15 +728,15 @@ int d2gs_char_location_update(void *p) {
 }*/
 
 void pickit_routine() {
+	pthread_mutex_lock(&items_m);
+	pthread_cleanup_push((pthread_cleanup_handler_t) pthread_mutex_unlock, (void *) &items_m);
+
 	routine_scheduled = FALSE;
 
 	plugin_print("pickit", "pickit routine started\n");
 
 	d2gs_send(0x3c, "%w 00 00 ff ff ff ff", 0x36);
 	msleep(300);
-
-	pthread_mutex_lock(&items_m);
-	pthread_cleanup_push((pthread_cleanup_handler_t) pthread_mutex_unlock, (void *) &items_m);
 
 	struct iterator it = list_iterator(&items);
 	item_t *i;
