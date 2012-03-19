@@ -1,5 +1,9 @@
 # plugin config file
 #
+# NOTE: the only mandatory setting when adding a <Plugin></Plugin> configuration is Name
+#       if no configuration for a given plugin can be found or a setting is not present it will fall back to a default value
+#       these default values might not be useful though
+#
 # Disable: if added to a plugin's settings the according plugin will be enabled/disabled (options: yes, no)
 
 # plugin bncs login
@@ -20,12 +24,13 @@
 
 # plugin mcp game
 #
+# Difficulty: sets the difficulty of the game (options: normal, nightmare, hell)
 # LobbyIdleTime: specifies how long to idle in lobby before creating next game (seconds)
 # GameNamePass: sets name and password to use (options: random, 'name'/'password')
 
 <Plugin type=nested>
 	Name = libmcp_game_plugin.so
-	Difficulty = Hell
+	Difficulty = hell
 	LobbyIdleTime = 15
 	GameNamePass = game/pass
 </Plugin>
@@ -47,12 +52,17 @@
 
 # plugin pickit
 #
-# define items to pickup by creating a <Item></Item> entry
+# define items to pick up by creating a <Item></Item> entry and set desired attributes
+# an item has to only match the given attributes; if an attribute is not present any value is valid
+# for example <Item type=nested></Item> would match any item
+#
 # possible attributes:
 #  Code: item code
 #  Quality: item quality (options: set, unique, other, normal, magic, rare, superior)
 #  Ethereal: ethereal flag (options: yes, no)
 #  Level: item level
+#  Amount: minimum amount needed (only useful for gold at the moment, any other item has amount 1)
+#  Log: specifies whether to log the pick to pickit.log (options: yes, no)
 
 <Plugin type=nested>
 	Name = libd2gs_pickit_plugin.so
@@ -72,6 +82,11 @@
 	</Item>
 	<Item type=nested>
 		Quality = unique
+	</Item>
+	<Item type=nested>
+		Log = no
+		Code = gld
+		Amount = 1000
 	</Item>
 </Plugin>
 
