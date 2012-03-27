@@ -42,6 +42,12 @@ typedef struct {
 #define D2GS_CAST(p) ((d2gs_packet_t *) p)
 
 // exported
+size_t d2gs_create_packet_header(size_t, byte *);
+
+// exported
+size_t d2gs_compress(byte *, size_t, byte *);
+
+// exported
 size_t d2gs_send(byte, char *, ...);
 
 void d2gs_send_raw(byte *, size_t);

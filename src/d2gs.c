@@ -225,7 +225,7 @@ static const unsigned int compression_table[] =
 	0x22080203, 0x0C080306, 0x0C080307, 0x0D080300, 0x0D080301, 0x0D080302, 0x0D080303, 0x6C060000,
 };
 
-static size_t d2gs_create_packet_header(size_t size, byte *output) {
+_export size_t d2gs_create_packet_header(size_t size, byte *output) {
 	if (size > 238) {
 		size += 2;
 		size |= 0xF000;
@@ -233,15 +233,15 @@ static size_t d2gs_create_packet_header(size_t size, byte *output) {
 		*output = (byte) (size & 0xFF);
 		return 2;
 	} else {
-		*output = (byte) (size + 1);
+		*++output = (byte) (size + 1);
 		return 1;
 	}
 }
 
 
-static size_t d2gs_compress(byte *input, size_t input_size, byte *output) {
+_export size_t d2gs_compress(byte *input, size_t input_size, byte *output) {
 	unsigned int a, e, buf = 0;
-	unsigned int count = 0;
+	int count = 0;
 	byte *output_base = output;
 	while (input_size > 0) {
 		input_size--;
@@ -251,6 +251,7 @@ static size_t d2gs_compress(byte *input, size_t input_size, byte *output) {
 		count += (a & 0xFF0000) >> 16;
 		if (e) {
 			buf |= ((a & 0xFF) << (8 - e)) << (24 - count);
+			count += e;
 		}
 		while (count > 8) {
 			*output++ = buf >> 24;

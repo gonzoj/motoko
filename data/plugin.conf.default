@@ -151,3 +151,12 @@
 	Name = libd2gs_meph_plugin.so
 	Disabled = yes
 </Plugin>
+
+# plugin record
+#
+# ReplayDir: the directory for saving replay files (absolute path or relative to .motoko/profiles/'profile')
+
+<Plugin type=nested>
+	Name = libd2gs_record_plugin.so
+	ReplayDir = replays
+</Plugin>
