@@ -219,20 +219,25 @@ size_t net_build_data(void **data, char *format, va_list args) {
 	char *chunk = strtok(copy, " ");
 	while (chunk != NULL) {
 		byte *bytes;
+		byte buf[sizeof(dword)];
 		size_t len;
 		if (strcmp(chunk, "%b") == 0) {
 			byte b = va_arg(args, dword) & 0xff;
-			bytes = &b;
+			//bytes = &b;
+			buf[0] = b;
+			bytes = buf;
 			len = sizeof(byte);
 		} else if (strcmp(chunk, "%w") == 0) {
-			byte b[sizeof(word)];
-			*(word *)&b = va_arg(args, dword) & 0xffff;
-			bytes = b;
+			//byte b[sizeof(word)];
+			*(word *)&buf = va_arg(args, dword) & 0xffff;
+			//bytes = b;
+			bytes = buf;
 			len = sizeof(word);
 		} else if (strcmp(chunk, "%d") == 0) {
-			byte b[sizeof(dword)];
-			*(dword *)&b = va_arg(args, dword);
-			bytes = b;
+			//byte b[sizeof(dword)];
+			*(dword *)&buf = va_arg(args, dword);
+			//bytes = b;
+			bytes = buf;
 			len = sizeof(dword);
 		} else if (strcmp(chunk, "%s") == 0) {
 			bytes = va_arg(args, byte *);
@@ -246,7 +251,9 @@ size_t net_build_data(void **data, char *format, va_list args) {
 			//string_to_byte(chunk, &b);
 			sscanf(chunk, "%x", &tmp);
 			b = tmp & 0xff;
-			bytes = &b;
+			//bytes = &b;
+			buf[0] = b;
+			bytes = buf;
 			len = sizeof(byte);
 		}
 		n_bytes += len;
