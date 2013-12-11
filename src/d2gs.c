@@ -382,6 +382,8 @@ static size_t d2gs_receive(byte **packet, size_t *header_size, size_t *data_size
 					len = 0;
 				}
 
+				print("[D2GS] connection hung up\n");
+
 				d2gs_engine_shutdown = TRUE;
 				return received;
 			}
@@ -743,7 +745,9 @@ void * d2gs_client_engine(d2gs_con_info_t *info) {
 
 	int errors = 0;
 
-	while (!d2gs_engine_shutdown) {
+	bool term = FALSE;
+
+	while (!d2gs_engine_shutdown && !term) {
 		d2gs_packet_t incoming = d2gs_new_packet();
 
 		if ((int) d2gs_receive_packet(&incoming) <= 0) { // TODO: sometimes the connection seems to hang up but we don't get unblocked
@@ -802,7 +806,9 @@ void * d2gs_client_engine(d2gs_con_info_t *info) {
 		case 0x06:
 		case 0xb4:
 		case 0xb0: {
-			net_shutdown(d2gs_socket);
+			print("[D2GS] connection terminated\n");
+			//net_shutdown(d2gs_socket);
+			term = TRUE;
 			break;
 		}
 
