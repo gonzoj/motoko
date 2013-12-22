@@ -26,6 +26,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <util/compat.h>
+
 #include "replay.h"
 
 #ifndef UNIX_PATH_MAX

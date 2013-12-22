@@ -24,6 +24,8 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 
+#include <util/compat.h>
+
 #include <module.h>
 
 #include <d2gs.h>

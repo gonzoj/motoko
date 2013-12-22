@@ -23,6 +23,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "util/compat.h"
+
 #include "util/string.h"
 
 void string_random(unsigned len, char base, unsigned range, char *seq) {

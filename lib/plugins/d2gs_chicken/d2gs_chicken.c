@@ -19,18 +19,21 @@
 
 #define _PLUGIN
 
+#include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
 
 #include <module.h>
 
 #include <d2gs.h>
+#include <internal.h>
 #include <packet.h>
 #include <settings.h>
 #include <gui.h>
 
 #include <util/net.h>
 #include <util/list.h>
+#include <util/system.h>
 #include <util/types.h>
 
 #define PERCENT(a, b) ((a) != 0 ? (int) (((double) (b) / (double) (a)) * 100) : 0)
@@ -39,10 +42,11 @@ static struct setting module_settings[] = (struct setting []) {
 	SETTING("HPPotionLimit", 0, INTEGER),
 	SETTING("MPPotionLimit", 0, INTEGER),
 	SETTING("HPChickenLimit", 0, INTEGER),
-	SETTING("MPChickenLimit", 0, INTEGER)
+	SETTING("MPChickenLimit", 0, INTEGER),
+	SETTING("ForceExitDelay", 0, INTEGER)
 };
 
-static struct list module_settings_list = LIST(module_settings, struct setting, 4);
+static struct list module_settings_list = LIST(module_settings, struct setting, 5);
 
 #define module_setting(name) ((struct setting *)list_find(&module_settings_list, (comparator_t) compare_setting, name))
 
@@ -67,11 +71,19 @@ struct list belt;
 
 potion_t npc_hp, npc_mp;
 
+static pthread_mutex_t chicken_m;
+static pthread_cond_t chicken_cv;
+
+static bool exit_game;
+static bool exit_ack;
+
 int d2gs_char_update(void *);
 int d2gs_belt_update(void *);
 int d2gs_shop_update(void *);
 int d2gs_on_npc_interact(void *);
 int d2gs_on_npc_quit(void *);
+int d2gs_on_exit_ack(void *);
+int internal_on_module_cleanup(internal_packet_t *);
 
 _export const char * module_get_title() {
 	return "chicken";
@@ -94,7 +106,7 @@ _export int module_get_license() {
 }
 
 _export module_type_t module_get_type() {
-	return (module_type_t) { MODULE_D2GS, MODULE_PASSIVE };
+	return (module_type_t) { MODULE_D2GS, MODULE_ACTIVE };
 }
 
 _export bool module_load_config(struct setting_section *s) {
@@ -117,6 +129,8 @@ _export bool module_init() {
 	register_packet_handler(D2GS_RECEIVED, 0x9c, d2gs_shop_update);
 	register_packet_handler(D2GS_SENT, 0x38, d2gs_on_npc_interact);
 	register_packet_handler(D2GS_SENT, 0x30, d2gs_on_npc_quit);
+	register_packet_handler(D2GS_RECEIVED, 0x06, d2gs_on_exit_ack);
+	register_packet_handler(INTERNAL, D2GS_ENGINE_MESSAGE, (packet_handler_t) internal_on_module_cleanup);
 
 	belt = list_new(potion_t);
 
@@ -132,6 +146,12 @@ _export bool module_init() {
 	rip = 0;
 	n_games = 0;
 
+	pthread_mutex_init(&chicken_m, NULL);
+	pthread_cond_init(&chicken_cv, NULL);
+
+	exit_game = FALSE;
+	exit_ack = FALSE;
+
 	return TRUE;
 }
 
@@ -141,8 +161,14 @@ _export bool module_finit() {
 	unregister_packet_handler(D2GS_RECEIVED, 0x9c, d2gs_shop_update);
 	unregister_packet_handler(D2GS_SENT, 0x38, d2gs_on_npc_interact);
 	unregister_packet_handler(D2GS_SENT, 0x30, d2gs_on_npc_quit);
-	
+	unregister_packet_handler(D2GS_RECEIVED, 0x06, d2gs_on_exit_ack);
+	unregister_packet_handler(INTERNAL, D2GS_ENGINE_MESSAGE, (packet_handler_t) internal_on_module_cleanup);
+
+
 	list_clear(&belt);
+
+	pthread_mutex_destroy(&chicken_m);
+	pthread_cond_destroy(&chicken_cv);
 
 	ui_add_statistics_plugin("chicken", "healing pots used: %i\n", total_hp_pots_used);
 	ui_add_statistics_plugin("chicken", "mana pots used: %i\n", total_mp_pots_used);
@@ -153,7 +179,49 @@ _export bool module_finit() {
 }
 
 _export void * module_thread(void *arg) {
-	return NULL;
+	pthread_mutex_lock(&chicken_m);
+
+	if (!exit_ack) {
+		pthread_cond_wait(&chicken_cv, &chicken_m);
+	}
+
+	if (exit_game) {
+		pthread_mutex_unlock(&chicken_m);
+		msleep(module_setting("ForceExitDelay")->i_var);
+		pthread_mutex_lock(&chicken_m);
+
+		if (!exit_ack) {
+			pthread_mutex_unlock(&chicken_m);
+
+			plugin_print("chicken", "%i ms have passed without an exit acknowledgement\n", module_setting("ForceExitDelay")->i_var);
+			plugin_print("chicken", "requesting forced disconnect\n");
+
+			internal_send(INTERNAL_REQUEST, "%d", D2GS_ENGINE_SHUTDOWN);
+		} else {
+			pthread_mutex_unlock(&chicken_m);
+		}
+	} else {
+		pthread_mutex_unlock(&chicken_m);
+	}
+
+	exit_game = FALSE;
+	exit_ack = FALSE;
+
+	pthread_exit(NULL);
+}
+
+int internal_on_module_cleanup(internal_packet_t *p) {
+	if (*(int *)p->data == MODULES_CLEANUP) {
+		pthread_mutex_lock(&chicken_m);
+
+		exit_ack = TRUE;
+
+		pthread_cond_signal(&chicken_cv);
+
+		pthread_mutex_unlock(&chicken_m);
+	}
+
+	return FORWARD_PACKET;
 }
 
 _export void module_cleanup() {
@@ -163,6 +231,20 @@ _export void module_cleanup() {
 	npc_id = 0;
 
 	n_games++;
+}
+
+void leave_game() {
+	d2gs_send(0x69, "");
+
+	chicken++;
+
+	pthread_mutex_lock(&chicken_m);
+
+	exit_game = TRUE;
+
+	pthread_cond_signal(&chicken_cv);
+
+	pthread_mutex_unlock(&chicken_m);
 }
 
 int compare_code(const void *pot, const void *code) {
@@ -210,46 +292,38 @@ int d2gs_char_update(void *p) {
 		plugin_debug("chicken", "update hp: %i mp: %i\n", updated_hp, updated_mp);
 
 		if (updated_hp == 0 && updated_hp < hp) {
-			plugin_print("chicken", "RIP\n");
-
 			d2gs_send(0x69, "");
+
+			plugin_print("chicken", "RIP\n");
 
 			rip++;
 		}
 		else if (updated_hp < module_setting("HPChickenLimit")->i_var && updated_hp < hp) {
-			plugin_print("chicken", "chicken\n");
+			leave_game();
 
-			d2gs_send(0x69, ""); 
-
-			chicken++;
+			plugin_print("chicken", "chicken (%i hp)\n", updated_hp);
 		}
 		else if (updated_hp < module_setting("HPPotionLimit")->i_var  && updated_hp < hp) {
-			plugin_print("chicken", "use healing pot\n");
-
 			if (!potion(HEALTH_POTION)) {
-				plugin_print("chicken", "no healing pot left - exting game\n");
+				leave_game();
 
-				d2gs_send(0x69, "");
-
-				chicken++;
+				plugin_print("chicken", "no healing pot left (%i hp) - exiting game\n", updated_hp);
+			} else {
+				plugin_print("chicken", "use healing pot (%i hp)\n", updated_hp);
 			}
 		}
 		else if (updated_mp < module_setting("MPChickenLimit")->i_var && updated_mp < mp) {
-			plugin_print("chicken", "chicken\n");
+			leave_game();
 
-			d2gs_send(0x69, "");
-
-			chicken++;
+			plugin_print("chicken", "chicken (%i mp)\n", updated_mp);
 		}
 		else if (updated_mp < module_setting("MPPotionLimit")->i_var && updated_mp < mp) {
-			plugin_print("chicken", "use mana pot\n");
-
 			if (!potion(MANA_POTION)) {
-				plugin_print("chicken", "no mana pot left - exting game\n");
+				leave_game();
 
-				d2gs_send(0x69, "");
-
-				chicken++;
+				plugin_print("chicken", "no mana pot left (%i mp) - exiting game\n", updated_mp);
+			} else {
+				plugin_print("chicken", "use mana pot (%i mp)\n", updated_mp);
 			}
 		}
 		
@@ -272,10 +346,12 @@ int d2gs_belt_update(void *p) {
 		pot.id = id;
 
 		list_add(&belt, &pot);
+
+		plugin_debug("chicken", "add pot %s (%08X) to belt\n", pot.code, id);
 	} else if (action == 0x0f) {
 		potion_t *pot = (potion_t *) list_find(&belt, compare_id, (void *) &id);
 		if (pot) {
-			list_remove(&belt, pot);
+			plugin_debug("chicken", "remove pot %s (%08X) from belt\n", pot->code, pot->id);
 
 			if (strstr(pot->code, "hp")) {
 				hp_pots_used++;
@@ -284,6 +360,9 @@ int d2gs_belt_update(void *p) {
 				mp_pots_used++;
 				total_mp_pots_used++;
 			}
+			plugin_debug("chicken", "hp pots %i mp pots %i\n", hp_pots_used, mp_pots_used);
+
+			list_remove(&belt, pot);
 		}
 	}
 
@@ -302,8 +381,12 @@ int d2gs_shop_update(void *p) {
 
 		if (strstr((char *) code, "hp")) {
 			npc_hp.id = id;
+
+			plugin_debug("chicken", "add pot %s (%08X) to shop\n", code, id);
 		} else if (strstr((char *) code, "mp")) {
 			npc_mp.id = id;
+
+			plugin_debug("chicken", "add pot %s (%08X) to shop\n", code, id);
 		}
 	}
 
@@ -316,29 +399,41 @@ int d2gs_on_npc_interact(void *p) {
 	if (net_get_data(packet->data, 0, dword) == 0x01) {
 		in_trade = TRUE;
 		npc_id = net_get_data(packet->data, 4, dword);
+
+		plugin_debug("chicken", "in trade with npc %08X\n", npc_id);
 	}
 
 	return FORWARD_PACKET;
 }
 
 void restock_potions() {
+	plugin_debug("chicken", "restocking pots\n");
+
 	int i;
 
 	for (i = 0; i < hp_pots_used && npc_hp.id && npc_id; i++) {
 		d2gs_send(0x32, "%d %d 00 00 00 00 64 00 00 00", npc_id, npc_hp.id);
+
+		msleep(200);
 	}
 
-	if (i) plugin_print("chicken",  "restocked %i healing pot(s)\n", i);
+	if (i) {
+		plugin_print("chicken",  "restocked %i healing pot(s)\n", i);
 
-	hp_pots_used = 0;
+		hp_pots_used = 0;
+	}
 
 	for (i = 0; i < mp_pots_used && npc_mp.id && npc_id; i++) {
 		d2gs_send(0x32, "%d %d 00 00 00 00 64 00 00 00", npc_id, npc_mp.id);
+
+		msleep(200);
 	}
 
-	if (i) plugin_print("chicken", "restocked %i mana pot(s)\n", i);
+	if (i) {
+		plugin_print("chicken", "restocked %i mana pot(s)\n", i);
 
-	mp_pots_used = 0;
+		mp_pots_used = 0;
+	}
 }
 
 int d2gs_on_npc_quit(void *p) {
@@ -355,6 +450,16 @@ int d2gs_on_npc_quit(void *p) {
 		npc_hp.id = 0;
 		npc_mp.id = 0;
 	}
+
+	return FORWARD_PACKET;
+}
+
+int d2gs_on_exit_ack(void *p) {
+	pthread_mutex_lock(&chicken_m);
+
+	exit_ack = TRUE;
+
+	pthread_mutex_unlock(&chicken_m);
 
 	return FORWARD_PACKET;
 }

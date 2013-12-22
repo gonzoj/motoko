@@ -25,6 +25,14 @@
 #include <time.h>
 #include <unistd.h>
 
+// setsocketopt
+#include <sys/socket.h>
+#include <sys/types.h>
+// struct timeval
+#include <sys/time.h>
+
+#include <config.h>
+
 #include "internal.h"
 #include "bncs.h"
 #include "settings.h"
@@ -36,7 +44,9 @@
 #include <util/net.h>
 #include <util/system.h>
 
+#ifdef USE_LIBWARDENC
 #include <wardenc.h>
+#endif
 
 #include "d2gs.h"
 
@@ -48,7 +58,13 @@ static client_status_t d2gs_client_status = CLIENT_DISCONNECTED;
 
 static pthread_t d2gs_ping_tid;
 
+static bool ping_thread_running = FALSE;
+
 static dword d2gs_hash;
+
+static pthread_mutex_t socket_m;
+
+static bool socket_shutdown = FALSE;
 
 #define D2GS_DECOMPRESS_BUFFER_SIZE 0x6000
 
@@ -697,6 +713,12 @@ static bool d2gs_connect(d2gs_con_info_t *info) {
 	print("done\n");
 	ui_console_unlock();
 
+	// FIXME; for some reason we don't receive 0x06 if we specify a timeout
+	/*struct timeval to = { .tv_sec = 60, .tv_usec = 0 };
+	if (setsockopt(d2gs_socket, SOL_SOCKET, SO_RCVTIMEO, (void *) &to, sizeof(struct timeval)) < 0) {
+		print("[D2GS] warning: failed to set timeout for input operation\n");
+	}*/
+
 	d2gs_client_status = CLIENT_CONNECTED;
 
 	return TRUE;
@@ -710,14 +732,21 @@ void d2gs_shutdown() {
 		return;
 	}
 
-	net_shutdown(d2gs_socket);
+	pthread_mutex_lock(&socket_m);
 
-	print("[D2GS] shutdown connection\n");
+	if (!socket_shutdown) {
+		net_shutdown(d2gs_socket);
+		socket_shutdown = TRUE;
+
+		print("[D2GS] shutdown connection\n");
+	}
+
+	pthread_mutex_unlock(&socket_m);
 }
 
 static void d2gs_disconnect() {
 
-	pthread_join(d2gs_ping_tid, NULL);
+	//pthread_join(d2gs_ping_tid, NULL);
 
 	net_disconnect(d2gs_socket);
 
@@ -726,13 +755,32 @@ static void d2gs_disconnect() {
 	d2gs_client_status = CLIENT_DISCONNECTED;
 }
 
+static int on_internal_request(internal_packet_t *p) {
+	if (*(int *)p->data == D2GS_ENGINE_SHUTDOWN) {
+		print("[D2GS] shutdown requested\n");
+		print("[D2GS] shutting down...\n");
+
+		d2gs_shutdown();
+	}
+
+	return FORWARD_PACKET;
+}
+
 void * d2gs_client_engine(d2gs_con_info_t *info) {
+	pthread_mutex_init(&socket_m, NULL);
+
+	socket_shutdown = FALSE;
+
+	register_packet_handler(INTERNAL, INTERNAL_REQUEST, (packet_handler_t) on_internal_request);
 
 	internal_send(D2GS_ENGINE_MESSAGE, "%d", ENGINE_STARTUP);
 
 	if (!d2gs_connect(info)) {
-
 		internal_send(D2GS_ENGINE_MESSAGE, "%d", ENGINE_SHUTDOWN);
+
+		unregister_packet_handler(INTERNAL, INTERNAL_REQUEST, (packet_handler_t) on_internal_request);
+
+		pthread_mutex_destroy(&socket_m);
 
 		pthread_exit(NULL);
 	}
@@ -747,16 +795,25 @@ void * d2gs_client_engine(d2gs_con_info_t *info) {
 
 	bool term = FALSE;
 
+	pthread_mutex_lock(&socket_m);
+
 	while (!d2gs_engine_shutdown && !term) {
 		d2gs_packet_t incoming = d2gs_new_packet();
+
+		pthread_mutex_unlock(&socket_m);
 
 		if ((int) d2gs_receive_packet(&incoming) <= 0) { // TODO: sometimes the connection seems to hang up but we don't get unblocked
 			if (!d2gs_engine_shutdown) { // we might have to use non-blocking sockets and select :-/
 				error("[D2GS] error: failed to process packet\n");
 				errors++;
 			}
+			
+			pthread_mutex_lock(&socket_m);
+
 			continue;
 		}
+
+		pthread_mutex_lock(&socket_m);
 
 		switch (incoming.id) {
 
@@ -791,6 +848,7 @@ void * d2gs_client_engine(d2gs_con_info_t *info) {
 		case 0x01: {
 			d2gs_send(0x6d, "%d 00 00 00 00 00 00 00 00", (dword) system_get_clock_ticks);
 			pthread_create(&d2gs_ping_tid, NULL, d2gs_ping_thread, NULL);
+			ping_thread_running = TRUE;
 			break;
 		}
 
@@ -819,17 +877,21 @@ void * d2gs_client_engine(d2gs_con_info_t *info) {
 			if (setting("Verbose")->b_var) {
 				print("[D2GS] warden packet received:\n\n");
 			}
+
 			if (setting("ResponseWarden")->b_var) {
 				byte *p = (byte *) malloc(incoming.len);
 				p[0] = incoming.id;
 				memcpy(p + 1, incoming.data, incoming.len - 1);
 
+#ifdef USE_LIBWARDENC
 				wardenc_engine(p, incoming.len);
+#endif
+
+				if (setting("Verbose")->b_var) {
+					print("\n");
+				}
 
 				free(p);
-			}
-			if (setting("Verbose")->b_var) {
-				print("\n");
 			}
 
 			ui_console_unlock();
@@ -844,7 +906,12 @@ void * d2gs_client_engine(d2gs_con_info_t *info) {
 		}
 	}
 
-	net_shutdown(d2gs_socket); // TODO: we might want to ensure not to call shutdown twice
+	if (!socket_shutdown) {
+		net_shutdown(d2gs_socket); // TODO: we might want to ensure not to call shutdown twice
+		socket_shutdown = TRUE;
+	}
+
+	pthread_mutex_unlock(&socket_m);
 
 	internal_send(D2GS_ENGINE_MESSAGE, "%d", MODULES_CLEANUP);
 
@@ -852,7 +919,8 @@ void * d2gs_client_engine(d2gs_con_info_t *info) {
 
 	clear_module_schedule(MODULE_D2GS);
 
-	pthread_join(d2gs_ping_tid, NULL);
+	if (ping_thread_running) pthread_join(d2gs_ping_tid, NULL);
+	ping_thread_running = FALSE;
 
 	d2gs_disconnect();
 
@@ -865,6 +933,10 @@ void * d2gs_client_engine(d2gs_con_info_t *info) {
 	free(info);
 
 	internal_send(D2GS_ENGINE_MESSAGE, "%d", ENGINE_SHUTDOWN);
+
+	unregister_packet_handler(INTERNAL, INTERNAL_REQUEST, (packet_handler_t) on_internal_request);
+
+	pthread_mutex_destroy(&socket_m);
 
 	pthread_exit(NULL);
 }

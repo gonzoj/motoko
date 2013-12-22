@@ -86,7 +86,7 @@ _export const char * module_get_author() {
 }
 
 _export const char * module_get_description() {
-	return "supposed to to mephisto runs";
+	return "supposed to do mephisto runs";
 }
 
 _export int module_get_license() {

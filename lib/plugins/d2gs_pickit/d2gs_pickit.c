@@ -37,6 +37,7 @@
 #include <gui.h>
 #include <data/item_codes.h>
 
+#include <util/config.h>
 #include <util/net.h>
 #include <util/list.h>
 #include <util/string.h>
@@ -67,8 +68,9 @@ typedef struct {
 	point_t location;
 	byte level;
 	dword id;
-	bool ethereal;
+	int ethereal;
 	dword amount;
+	int sockets;
 	int distance; // test pickit
 } item_t;
 
@@ -110,9 +112,15 @@ void item_dump(item_t *i) {
 		sprintf(level, "%i", i->level);
 	}
 	char *ethereal = (i->ethereal & UNSPECIFIED) == UNSPECIFIED ? "UNSPECIFIED" : (i->ethereal ? "yes" : "no");
-	char *amount = "UNSPECIFIED";
+	char amount[100];
+	strcpy(amount, "UNSPECIFIED");
 	if (i->amount != (UNSPECIFIED | (UNSPECIFIED << 8) | (UNSPECIFIED << 16) | (UNSPECIFIED << 24))) {
-		sprintf(amount, "%i", i->amount);
+		sprintf(amount, "%u", i->amount);
+	}
+	char sockets[100];
+	strcpy(sockets, "UNSPECIFIED");
+	if ((i->sockets & UNSPECIFIED) != UNSPECIFIED) {
+		sprintf(sockets, "%i", i->sockets);
 	}
 
 	ui_console_lock();
@@ -122,7 +130,8 @@ void item_dump(item_t *i) {
 	plugin_print("pickit", "code:        %s\n", code);
 	plugin_print("pickit", "level:       %s\n", level);
 	plugin_print("pickit", "ethereal:    %s\n", ethereal);
-	plugin_print("pickit", "amount:      %i\n", amount);
+	plugin_print("pickit", "amount:      %s\n", amount);
+	plugin_print("pickit", "sockets:     %s\n", sockets);
 	plugin_print("pickit", "\n");
 
 	ui_console_unlock();
@@ -222,7 +231,16 @@ _export module_type_t module_get_type() {
 }
 
 _export bool module_load_config(struct setting_section *s) {
+	int i;
+
 	if (strcmp(s->name, "Item")) {
+		/*for (i = 0; i < s->entries; i++) {
+			if (!strcmp(s->settings[i].name, "File")) {
+				plugin_print("pickit", "recursively loading pickit config from file %s\n", s->settings[i].s_var);
+				config_load_settings(s->settings[i].s_var, (void(*)(struct setting_section *)) module_load_config);
+			}
+		}*/
+
 		return TRUE;
 	}
 
@@ -230,8 +248,6 @@ _export bool module_load_config(struct setting_section *s) {
 
 	item_t item;
 	memset(&item, UNSPECIFIED, sizeof(item_t));
-
-	int i;
 
 	for (i = 0; i < s->entries; i++) {
 		if (!strcmp(s->settings[i].name, "Log")) {
@@ -286,6 +302,10 @@ _export bool module_load_config(struct setting_section *s) {
 
 		if (!strcmp(s->settings[i].name, "Amount")) {
 			sscanf(s->settings[i].s_var, "%i", &item.amount);
+		}
+
+		if (!strcmp(s->settings[i].name, "Sockets")) {
+			sscanf(s->settings[i].s_var, "%i", &item.sockets);
 		}
 	}
 
@@ -369,6 +389,7 @@ _export void module_cleanup() {
 			if (i->quality != 0x00) logitem("%s ", qualities[i->quality]);
 			logitem("%s", lookup_item(i));
 			if (i->quality != 0x00) logitem(" (%i)", i->level);
+			if (i->sockets > 0) logitem(" [%i]", i->sockets);
 			if (setting("Debug")->b_var) logitem(" distance: %i", i->distance); // test pickit
 			logitem("\n");
 		}
@@ -480,6 +501,23 @@ item_t * item_new(d2gs_packet_t *packet, item_t *new) {
 		}
 	}
 
+	if ((new->destination == 0x03) && ((new->quality == 0x02) || (new->quality == 0x03)) && net_extract_bits(packet->data, 67, 1)) { // has sockets
+		// bit 179: has graphic
+		int i = 179;
+		if (net_extract_bits(packet->data, i++, 1)) i += 3;
+		//i++;
+		if (net_extract_bits(packet->data, i++, 1)) i += 11;
+		//i++;
+		if (new->quality == 0x03) i += 3;
+		// if armor skip 11; use item category byte (probably not as acurate as checking item code)
+		if (net_extract_bits(packet->data, 8, 8) != 0x05 && net_extract_bits(packet->data, 8, 8) != 0x06) i += 11;
+		i += 8;
+		if (strcmp(new->code, "7cr")) i += 9;
+		new->sockets = net_extract_bits(packet->data, i, 4);
+	} else {
+		new->sockets = 0;
+	}
+
 	new->distance = DISTANCE(new->location, location);
 
 	return new;
@@ -503,6 +541,10 @@ bool item_is_valuable(item_t *i, item_t *j) {
 	}
 
 	if (j->amount != (UNSPECIFIED | (UNSPECIFIED << 8) | (UNSPECIFIED << 16) | (UNSPECIFIED << 24)) && i->amount < j->amount) {
+		return FALSE;
+	}
+
+	if ((j->sockets & UNSPECIFIED) != UNSPECIFIED && i->sockets != j->sockets) {
 		return FALSE;
 	}
 
@@ -560,6 +602,7 @@ int d2gs_item_action(void *p) {
 		sprintf(amount, "%i ", i.amount);
 		plugin_print("pickit", "%s%s%s%s%s ", i.amount > 1 ? amount : "", i.ethereal ? "ethereal " : "", i.quality == 0x00 ? "" : qualities[i.quality], i.quality == 0x00 ? "" : " ", lookup_item(&i));
 		if (i.quality != 0x00) print("(%i) ", i.level);
+		if (i.sockets > 0) print("[%i] ", i.sockets);
 		print("dropped\n");
 
 		ui_console_unlock();
@@ -584,6 +627,7 @@ int d2gs_item_action(void *p) {
 				if (j->quality != 0x00) logitem("%s ", qualities[j->quality]);
 				logitem("%s", lookup_item(j));
 				if (j->quality != 0x00) logitem(" (%i)", j->level);
+				if (j->sockets > 0) logitem(" [%i]", j->sockets);
 				if (setting("Debug")->b_var) logitem(" distance: %i", j->distance); // test pickit
 				logitem("\n");
 			}
@@ -728,8 +772,8 @@ int d2gs_gold_update(void *p) {
 }*/
 
 void pickit_routine() {
-	pthread_mutex_lock(&items_m);
-	pthread_cleanup_push((pthread_cleanup_handler_t) pthread_mutex_unlock, (void *) &items_m);
+	//pthread_mutex_lock(&items_m);
+	//pthread_cleanup_push((pthread_cleanup_handler_t) pthread_mutex_unlock, (void *) &items_m);
 
 	routine_scheduled = FALSE;
 
@@ -741,7 +785,10 @@ void pickit_routine() {
 	struct iterator it = list_iterator(&items);
 	item_t *i;
 
+	pthread_mutex_lock(&items_m);
+
 	while ((i = iterator_next(&it))) {
+		pthread_mutex_unlock(&items_m);
 
 		plugin_print("pickit", "pick up %s\n", lookup_item(i));
 
@@ -753,8 +800,10 @@ void pickit_routine() {
 
 		msleep(250);
 
+		pthread_mutex_lock(&items_m);
 	}
 
-	pthread_cleanup_pop(1);
+	pthread_mutex_unlock(&items_m);
 
+	//pthread_cleanup_pop(1);
 }

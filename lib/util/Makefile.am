@@ -1,5 +1,6 @@
-includedir = @includedir@/@PACKAGE@/util
-include_HEADERS = \
+utildir = $(pkgincludedir)/util
+util_HEADERS = \
+	include/util/compat.h \
 	include/util/config.h \
 	include/util/curses.h \
 	include/util/error.h \
@@ -12,6 +13,8 @@ include_HEADERS = \
 
 noinst_LTLIBRARIES = libutil.la
 libutil_la_SOURCES = \
+	compat.c \
+	include/util/compat.h \
 	config.c \
 	include/util/config.h \
 	curses.c \
@@ -29,6 +32,5 @@ libutil_la_SOURCES = \
 	system.c \
 	include/util/system.h \
 	include/util/types.h
-libutil_la_CFLAGS = -m32 -g -Wall
 libutil_la_LDFLAGS = -static
-libutil_la_CPPFLAGS = -I./include
+libutil_la_LIBADD = -lopts -lncurses $(LADD_LIBRT)

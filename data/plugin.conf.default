@@ -5,11 +5,21 @@
 #       these default values might not be useful though
 #
 # Disable: if added to a plugin's settings the according plugin will be enabled/disabled (options: yes, no)
+# 
+# Include: include a given file to parse in this configuration (absolute path or relative to .motoko/profiles/'profile')
+#          this setting can be added at any level (globally, specific to a plugin or even within a nested setting of a plugin configuration)
+#          it can be used to place common settings of different profiles into a single file (e.g., items to pick or a common chicken configuration)
+#
+# NOTE: keep in mind that when adding an Include within a plugin configuration's nested setting, the setting's name
+#       will be replaced with the included file's name and hence will not be availale to the plugin's configuration
+#       parsing code (which is necessary in most cases)
+
+#Include = ../shared_plugin.conf
 
 # plugin bncs login
 
 <Plugin type=nested>
-	Name = libbncs_login_plugin.so
+	Name = bncs_login
 	Account = account
 	Password = password
 	Realm = Europe
@@ -18,7 +28,7 @@
 # plugin mcp login
 
 <Plugin type=nested>
-	Name = libmcp_login_plugin.so
+	Name = mcp_login
 	Character = character
 </Plugin>
 
@@ -27,12 +37,23 @@
 # Difficulty: sets the difficulty of the game (options: normal, nightmare, hell)
 # LobbyIdleTime: specifies how long to idle in lobby before creating next game (seconds)
 # GameNamePass: sets name and password to use (options: random, 'name'/'password')
+# RotateCDKeys: specifies whether CD keys should be switched after a given amount of runs (options: yes, no)
+# RotateAfterRuns: specifies the amount of runs after which CD keys will be switched
+#
+# to include a classic/expansion CD key pair in the rotation define a <KeySet type=nested></KeySet> entry
 
 <Plugin type=nested>
-	Name = libmcp_game_plugin.so
+	Name = mcp_game
 	Difficulty = hell
 	LobbyIdleTime = 15
 	GameNamePass = game/pass
+	RotateCDKeys = no
+	RotateAfterRuns = 20
+	<KeySet type=nested>
+		Classic = AAAAAAAAAAAAAAAA
+		Expansion = BBBBBBBBBBBBBBBB
+	</KeySet>
+	#Include = keysets.conf
 </Plugin>
 
 # plugin chicken
@@ -41,13 +62,15 @@
 # HPChickenLImit: specifies when to chicken due to health level
 # MPPotionLimit: specifies when to use a mana pot
 # MPChickenLimit: specifies when to chicken due to mana level
+# ForceExitDelay: specifies the delay before forcing a disconnect when no game exit acknowledgement is received (milliseconds)
 
 <Plugin type=nested>
-	Name = libd2gs_chicken_plugin.so
+	Name = d2gs_chicken
 	HPPotionLimit = 600
 	HPChickenLimit = 400
 	MPPotionLimit = 150
 	MPChickenLimit = 50
+	ForceExitDelay = 500
 </Plugin>
 
 # plugin pickit
@@ -63,9 +86,13 @@
 #  Level: item level
 #  Amount: minimum amount needed (only useful for gold at the moment, any other item has amount 1)
 #  Log: specifies whether to log the pick to pickit.log (options: yes, no)
+#  Sockets: number of sockets (only works for normal and superior quality)
+#
+# NOTE: socket attribute does not work correctly yet; DO NOT USE UNTIL FIXED
 
 <Plugin type=nested>
-	Name = libd2gs_pickit_plugin.so
+	Name = d2gs_pickit
+	#Include = set_items.conf
 	<Item type=nested>
 		Code = rin
 		Quality = unique
@@ -82,6 +109,12 @@
 	</Item>
 	<Item type=nested>
 		Quality = unique
+	</Item>
+	<Item type=nested>
+		Code = 7vo
+		Quality = superior
+		Ethereal = yes
+		#Sockets = 4
 	</Item>
 	<Item type=nested>
 		Log = no
@@ -107,7 +140,7 @@
 # RepairAfterRuns: after the defined number of runs the character will repair equipment (0 to disable)
 
 <Plugin type=nested>
-	Name = libd2gs_pes_plugin.so
+	Name = d2gs_pes
 	RunPindleskin = yes
 	RunEldritch = yes
 	RunShenk = no
@@ -129,7 +162,7 @@
 # NOTE: if hitting a hot IP the character will idle in game as long as another character joins and says '.continue' in chat
 
 <Plugin type=nested>
-	Name = libd2gs_dclone_plugin.so
+	Name = d2gs_dclone
 	Disabled = yes
 	GameIdleTime = 15
 	HotIPs = ".34:.56:.126"
@@ -140,7 +173,7 @@
 # CastDelay: specifies how long to idle after casting teleport (milliseconds)
 
 <Plugin type=nested>
-	Name = libd2gs_pathing_plugin.so
+	Name = d2gs_pathing
 	Disabled = yes
 	CastDelay = 250
 </Plugin>
@@ -148,7 +181,7 @@
 # plugin meph
 
 <Plugin type=nested>
-	Name = libd2gs_meph_plugin.so
+	Name = d2gs_meph
 	Disabled = yes
 </Plugin>
 
@@ -157,6 +190,6 @@
 # ReplayDir: the directory for saving replay files (absolute path or relative to .motoko/profiles/'profile')
 
 <Plugin type=nested>
-	Name = libd2gs_record_plugin.so
+	Name = d2gs_record
 	ReplayDir = replays
 </Plugin>

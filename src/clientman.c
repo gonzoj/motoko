@@ -30,6 +30,7 @@
 #include "settings.h"
 #include "gui.h"
 
+#include <util/system.h>
 //#include <util/types.h>
 
 /* statistics */
@@ -51,6 +52,8 @@ static pthread_mutex_t cm_continue_m;
 static pthread_cond_t cm_continue_cv;
 
 static bool cm_shutdown;
+
+static bool cm_restart;
 
 static pthread_mutex_t cm_manage_m;
 
@@ -311,6 +314,24 @@ static int on_internal_fatal_error(internal_packet_t *p) {
 	return FORWARD_PACKET;
 }
 
+static int on_internal_request(internal_packet_t *p) {
+	if (*(int *)p->data == CLIENT_RESTART) {
+		print("client restart requested\n");
+		print("restarting engines\n");
+
+		pthread_mutex_lock(&cm_continue_m);
+
+		cm_restart = TRUE;
+
+		// signal to restart client engines
+		pthread_cond_signal(&cm_continue_cv);
+
+		pthread_mutex_unlock(&cm_continue_m);
+	}
+
+	return FORWARD_PACKET;
+}
+
 void * client_manager_thread(void *arg) {
 	while (!cm_shutdown) {
 
@@ -320,6 +341,24 @@ void * client_manager_thread(void *arg) {
 
 		// wait for signal to restart BNCS engine
 		pthread_cond_wait(&cm_continue_cv, &cm_continue_m);
+
+		if (cm_restart) {
+			cm_restart = FALSE;
+
+			unregister_packet_handler(INTERNAL, BNCS_ENGINE_MESSAGE, (packet_handler_t) on_bncs_engine_shutdown);
+			unregister_packet_handler(INTERNAL, MCP_ENGINE_MESSAGE, (packet_handler_t) on_mcp_engine_shutdown);
+			unregister_packet_handler(INTERNAL, D2GS_ENGINE_MESSAGE, (packet_handler_t) on_d2gs_engine_shutdown);
+
+			stop_client_engine(D2GS_CLIENT_ENGINE);
+			stop_client_engine(MCP_CLIENT_ENGINE);
+			stop_client_engine(BNCS_CLIENT_ENGINE);
+
+			register_packet_handler(INTERNAL, BNCS_ENGINE_MESSAGE, (packet_handler_t) on_bncs_engine_shutdown);
+			register_packet_handler(INTERNAL, MCP_ENGINE_MESSAGE, (packet_handler_t) on_mcp_engine_shutdown);
+			register_packet_handler(INTERNAL, D2GS_ENGINE_MESSAGE, (packet_handler_t) on_d2gs_engine_shutdown);
+
+			system_sh(setting("OnRestart")->s_var);
+		}
 
 		pthread_mutex_unlock(&cm_continue_m);
 
@@ -342,7 +381,11 @@ void start_client_manager() {
 	register_packet_handler(INTERNAL, D2GS_ENGINE_MESSAGE, (packet_handler_t) on_d2gs_engine_shutdown);
 	register_packet_handler(INTERNAL, INTERNAL_FATAL_ERROR, (packet_handler_t) on_internal_fatal_error);
 
+	register_packet_handler(INTERNAL, INTERNAL_REQUEST, (packet_handler_t) on_internal_request);
+
 	cm_shutdown = FALSE;
+
+	cm_restart = FALSE;
 
 	pthread_mutex_init(&cm_continue_m, NULL);
 	pthread_cond_init(&cm_continue_cv, NULL);
@@ -360,6 +403,8 @@ void stop_client_manager() {
 	unregister_packet_handler(INTERNAL, MCP_ENGINE_MESSAGE, (packet_handler_t) on_mcp_engine_shutdown);
 	unregister_packet_handler(INTERNAL, D2GS_ENGINE_MESSAGE, (packet_handler_t) on_d2gs_engine_shutdown);
 	unregister_packet_handler(INTERNAL, INTERNAL_FATAL_ERROR, (packet_handler_t) on_internal_fatal_error);
+
+	unregister_packet_handler(INTERNAL, INTERNAL_REQUEST, (packet_handler_t) on_internal_request);
 
 	//stop_client_engine(D2GS_CLIENT_ENGINE);
 	//stop_client_engine(MCP_CLIENT_ENGINE);

@@ -155,6 +155,10 @@ int mcp_startup_handler(void *p) {
 	case 0x7f: {
 		plugin_error("mcp login", "error: temporary IP ban (\"your connection has been temporarily restricted from this realm.\")\n");
 
+		plugin_print("mcp login", "requesting client restart\n");
+
+		internal_send(INTERNAL_REQUEST, "%d", CLIENT_RESTART);
+
 		return FORWARD_PACKET;
 	}
 

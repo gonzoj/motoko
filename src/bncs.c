@@ -47,6 +47,10 @@ static client_status_t bncs_client_status = CLIENT_DISCONNECTED;
 
 static dword bncs_server_token;
 
+static pthread_mutex_t socket_m;
+
+static bool socket_shutdown = FALSE;
+
 static char bncs_auth_info_format[] = "00 00 00 00 36 38 58 49 50 58 32 44 %b 00 00 00 53 55 6e 65 c0 a8 02 8e 00 00 00 00 09 04 00 00 09 04 00 00 55 53 41 00 55 6e 69 74 65 64 20 53 74 61 74 65 73 00";
 
 static void bncs_dump_packet(bncs_packet_t packet) {
@@ -351,9 +355,16 @@ void bncs_shutdown() {
 		return;
 	}
 
-	net_shutdown(bncs_socket);
+	pthread_mutex_lock(&socket_m);
 
-	print("[BNCS] shutdown connection\n");
+	if (!socket_shutdown) {
+		net_shutdown(bncs_socket);
+		socket_shutdown = TRUE;
+
+		print("[BNCS] shutdown connection\n");
+	}
+
+	pthread_mutex_unlock(&socket_m);
 }
 
 static void bncs_disconnect() {
@@ -374,12 +385,17 @@ static int on_mcp_engine_connect(internal_packet_t *p) {
 }
 
 void * bncs_client_engine(void *arg) {
+	pthread_mutex_init(&socket_m, NULL);
+
+	socket_shutdown = FALSE;
 
 	internal_send(BNCS_ENGINE_MESSAGE, "%d", ENGINE_STARTUP);
 
 	if (!bncs_connect()) {
 
 		internal_send(BNCS_ENGINE_MESSAGE, "%d", ENGINE_SHUTDOWN);
+
+		pthread_mutex_destroy(&socket_m);
 
 		pthread_exit(NULL);
 	}
@@ -390,15 +406,23 @@ void * bncs_client_engine(void *arg) {
 
 	register_packet_handler(INTERNAL, MCP_CLIENT_ENGINE, (packet_handler_t) on_mcp_engine_connect);
 
+	pthread_mutex_lock(&socket_m);
+
 	while (!bncs_engine_shutdown) {
 		bncs_packet_t incoming = bncs_new_packet();
+
+		pthread_mutex_unlock(&socket_m);
 
 		if ((int) bncs_receive_packet(&incoming) < 0) {
 
 			print("[BNCS] connection closed\n");
 
+			pthread_mutex_lock(&socket_m);
+
 			break;
 		}
+
+		pthread_mutex_lock(&socket_m);
 
 		switch(incoming.id) {
 
@@ -533,7 +557,12 @@ void * bncs_client_engine(void *arg) {
 		}
 	}
 
-	net_shutdown(bncs_socket);
+	if (!socket_shutdown) {
+		net_shutdown(bncs_socket);
+		socket_shutdown = TRUE;
+	}
+
+	pthread_mutex_unlock(&socket_m);
 
 	internal_send(BNCS_ENGINE_MESSAGE, "%d", MODULES_CLEANUP);
 
@@ -548,6 +577,8 @@ void * bncs_client_engine(void *arg) {
 	unregister_packet_handler(INTERNAL, MCP_CLIENT_ENGINE, (packet_handler_t) on_mcp_engine_connect);
 
 	internal_send(BNCS_ENGINE_MESSAGE, "%d", ENGINE_SHUTDOWN);
+
+	pthread_mutex_destroy(&socket_m);
 
 	pthread_exit(NULL);
 }

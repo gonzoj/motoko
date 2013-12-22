@@ -27,7 +27,7 @@ clock_t system_get_clock_ticks();
 
 char * system_uptime();
 
-char * system_sh(char *);
+int system_sh(const char *);
 
 #define msleep(ms) usleep((ms) * 1000)
 

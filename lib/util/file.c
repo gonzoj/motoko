@@ -54,7 +54,7 @@ size_t file_read(const char *file, byte *buf, size_t len) {
 		free(e);
 		return -1;
 	}
-	size_t tmp, total = 0;
+	int tmp, total = 0;
 	do {
 		tmp = read(fd, buf + total, len - total);
 		if (tmp < 0) {
@@ -85,7 +85,7 @@ size_t file_write(const char *file, byte *buf, size_t len) {
 		free(e);
 		return -1;
 	}
-	size_t tmp, total = 0;
+	int tmp, total = 0;
 	do {
 		tmp = write(fd, buf + total, len - total);
 		if (tmp < 0) {

@@ -39,6 +39,10 @@ static client_status_t mcp_client_status = CLIENT_DISCONNECTED;
 
 /*static*/ bool mcp_engine_shutdown;
 
+static pthread_mutex_t socket_m;
+
+static bool socket_shutdown = FALSE;
+
 mcp_character_t mcp_characters[8] = { { { 0 }, 0 } };
 
 int mcp_character_index = 0;
@@ -214,9 +218,16 @@ void mcp_shutdown() {
 		return;
 	}
 
-	net_shutdown(mcp_socket);
+	pthread_mutex_lock(&socket_m);
 
-	print("[MCP] shutdown connection\n");
+	if (!socket_shutdown) {
+		net_shutdown(mcp_socket);
+		socket_shutdown = TRUE;
+
+		print("[MCP] shutdown connection\n");
+	}
+
+	pthread_mutex_unlock(&socket_m);
 }
 
 static void mcp_disconnect() {
@@ -248,12 +259,17 @@ static int on_d2gs_engine_connect(internal_packet_t *p) {
 }
 
 void * mcp_client_engine(mcp_con_info_t *info) {
+	pthread_mutex_init(&socket_m, NULL);
+
+	socket_shutdown = FALSE;
 
 	internal_send(MCP_ENGINE_MESSAGE, "%d", ENGINE_STARTUP);
 
 	if (!mcp_connect(info)) {
 
 		internal_send(MCP_ENGINE_MESSAGE, "%d", ENGINE_SHUTDOWN);
+
+		pthread_mutex_destroy(&socket_m);
 
 		pthread_exit(NULL);
 	}
@@ -265,15 +281,23 @@ void * mcp_client_engine(mcp_con_info_t *info) {
 	register_packet_handler(INTERNAL, D2GS_CLIENT_ENGINE, (packet_handler_t) on_d2gs_engine_connect);
 	register_packet_handler(MCP_SENT, 0x07, (packet_handler_t) mcp_on_char_logon);
 
+	pthread_mutex_lock(&socket_m);
+
 	while (!mcp_engine_shutdown) {
 		mcp_packet_t incoming = mcp_new_packet();
+
+		pthread_mutex_unlock(&socket_m);
 
 		if ((int) mcp_receive_packet(&incoming) < 0) {
 
 			print("[MCP] connection closed\n");
 
+			pthread_mutex_lock(&socket_m);
+
 			break;
 		}
+
+		pthread_mutex_lock(&socket_m);
 
 		switch(incoming.id) {
 
@@ -329,7 +353,12 @@ void * mcp_client_engine(mcp_con_info_t *info) {
 		}
 	}
 
-	net_shutdown(mcp_socket);
+	if (!socket_shutdown) {
+		net_shutdown(mcp_socket);
+		socket_shutdown = TRUE;
+	}
+
+	pthread_mutex_unlock(&socket_m);
 
 	internal_send(MCP_ENGINE_MESSAGE, "%d", MODULES_CLEANUP);
 
@@ -345,6 +374,8 @@ void * mcp_client_engine(mcp_con_info_t *info) {
 	unregister_packet_handler(INTERNAL, D2GS_CLIENT_ENGINE, (packet_handler_t) on_d2gs_engine_connect);
 
 	internal_send(MCP_ENGINE_MESSAGE, "%d", ENGINE_SHUTDOWN);
+
+	pthread_mutex_destroy(&socket_m);
 
 	pthread_exit(NULL);
 }

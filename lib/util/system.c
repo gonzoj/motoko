@@ -47,7 +47,7 @@ char * system_uptime() {
 	return str;
 }
 
-char * system_sh(char *cmd) {
-	// TODO: implementation
-	return NULL;
+int system_sh(const char *cmd) {
+	if (!cmd || !strlen(cmd)) return -1;
+	return system(cmd);
 }

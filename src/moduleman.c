@@ -25,6 +25,8 @@
 #include <string.h>
 #include <sys/types.h>
 
+#include <config.h>
+
 #include "moduleman.h"
 
 #include "settings.h"
@@ -236,16 +238,22 @@ static bool load_module(const char *mod) {
 }
 
 static int compare_module(module_t *m, const char *name) {
-	return !strcmp(strrchr(m->name, '/') ? strrchr(m->name, '/') + 1 : m->name, name);
+	//return !strcmp(strrchr(m->name, '/') ? strrchr(m->name, '/') + 1 : m->name, name);
+	//return !strcmp(m->title(), name);
+	char n[strlen(m->name) + 1];
+	strcpy(n, strrchr(m->name, '/') ? strrchr(m->name, '/') + 1 : m->name);
+	*strrchr(n, '_') = '\0';
+	return !strcmp(n, name);
 }
 
 static void load_module_config(struct setting_section *s) {
 	static bool (*load_config)(struct setting_section *) = NULL;
 	static bool disable = FALSE;
+	static char *name = NULL;
 	if (!strcmp(s->name, "Plugin")) {
 		load_config = NULL;
 		disable = FALSE;
-		char *name;
+		name = NULL;
 		struct setting *set = config_get_setting(s, "Name");
 		if (set) {
 			if (set->type == STRING) {
@@ -275,6 +283,24 @@ static void load_module_config(struct setting_section *s) {
 				}
 				break;
 			}
+		}
+	}
+	int i;
+	for (i = 0; i < s->entries; i++) {
+		if (!strcmp(s->settings[i].name, "Include")) {
+			bool (*_load_config)(struct setting_section *) = load_config;
+			bool _disable = disable;
+			char *_name = name;
+			if (!config_load_settings(s->settings[i].s_var, load_module_config)) {
+				if (name) {
+					print("warning: failed to include %s in %s (%s)\n", s->settings[i].s_var, s->name, name);
+				} else {
+					print("warning: failed to include %s in %s\n", s->settings[i].s_var, s->name);
+				}
+			}
+			load_config = _load_config;
+			disable = _disable;
+			name = _name;
 		}
 	}
 	if (load_config) {
@@ -319,9 +345,13 @@ void load_modules(const char *moddir) {
 		if (!ext) {
 			continue;	
 		}
-		if (strcmp(ext, "_plugin.so")) {
+		char *_ext;
+		string_new(&_ext, "_plugin", LT_MODULE_EXT, "");
+		if (strcmp(ext, _ext)) {
+			free(_ext);
 			continue;
 		}
+		free(_ext);
 		if (is_module_blacklisted(file->d_name)) {
 			print("plugin %s on blacklist... skip\n", file->d_name);
 			continue;

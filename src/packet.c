@@ -17,6 +17,9 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// for PTHREAD_MUTEX_RECURSIVE
+#define _GNU_SOURCE
+
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -35,6 +38,8 @@
 
 static struct list packet_handlers[7][0xFF];
 
+static pthread_mutex_t packet_handlers_m;
+
 void init_packet_handler_list() {
 	int i, j;
 	for (i = 0; i < 0xFF; i++) {
@@ -42,6 +47,13 @@ void init_packet_handler_list() {
 			packet_handlers[j][i] = list_new(packet_handler_t);
 		}
 	}
+
+	//pthread_mutex_init(&packet_handlers_m, NULL);
+	pthread_mutexattr_t attr;
+	pthread_mutexattr_init(&attr);
+	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+	pthread_mutex_init(&packet_handlers_m, &attr);
+	pthread_mutexattr_destroy(&attr);
 }
 
 void finit_packet_handler_list() {
@@ -51,10 +63,16 @@ void finit_packet_handler_list() {
 			list_clear(packet_handlers[j] + i);
 		}
 	}
+
+	pthread_mutex_destroy(&packet_handlers_m);
 }
 
 _export void add_packet_handler(packet_t type, byte id, packet_handler_t handler) {
+	pthread_mutex_lock(&packet_handlers_m);
+
 	list_add(&packet_handlers[type][id], &handler);
+
+	pthread_mutex_unlock(&packet_handlers_m);
 }
 
 static int compare_handler(packet_handler_t *a, packet_handler_t *b) {
@@ -62,10 +80,14 @@ static int compare_handler(packet_handler_t *a, packet_handler_t *b) {
 }
 
 _export void remove_packet_handler(packet_t type, byte id, packet_handler_t handler) {
+	pthread_mutex_lock(&packet_handlers_m);
+
 	void *h = list_find(&packet_handlers[type][id], (comparator_t) compare_handler, &handler);
 	if (h) {
 		list_remove(&packet_handlers[type][id], h);;
 	}
+
+	pthread_mutex_unlock(&packet_handlers_m);
 }
 
 int invoke_packet_handlers(packet_t type, void *packet) {
@@ -99,6 +121,8 @@ int invoke_packet_handlers(packet_t type, void *packet) {
 		return forward;
 
 	}
+
+	pthread_mutex_lock(&packet_handlers_m);
 
 	struct iterator i = list_iterator(&packet_handlers[type][id]);
 	while ((handler = iterator_next(&i))) {
@@ -154,6 +178,8 @@ int invoke_packet_handlers(packet_t type, void *packet) {
 			break;
 
 		default:
+			pthread_mutex_unlock(&packet_handlers_m);
+
 			return forward;
 
 		}
@@ -168,6 +194,8 @@ int invoke_packet_handlers(packet_t type, void *packet) {
 			break;
 		}
 	}
+
+	pthread_mutex_unlock(&packet_handlers_m);
 
 	return forward;
 }

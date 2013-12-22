@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 gonzoj
+ * Copyright (C) 2013 gonzoj
  *
  * Please check the CREDITS file for further information.
  *
@@ -17,25 +17,25 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef TYPES_H_
-#define TYPES_H_
+#include <config.h>
 
-typedef unsigned char byte;
+#ifndef HAVE_CLOCK_GETTIME
 
-typedef unsigned short word;
+#include <sys/time.h>
+#include <time.h>
 
-typedef unsigned int dword;
+#ifndef HAVE_CLOCKID_T
+#include "util/compat.h"
+#endif
 
-#include <stdbool.h>
+int clock_gettime(clockid_t clk_id, struct timespec *tp) {
+	struct timeval tv;
+	int r = gettimeofday(&tv, NULL);
+	if (r == 0) {
+		tp->tv_sec = tv.tv_sec;
+		tp->tv_nsec = tv.tv_usec * 1000;
+	}
+	return r;
+}
 
-#undef FALSE
-#define FALSE false
-
-#undef TRUE
-#define TRUE true
-
-//#ifndef INCLUDE_NCURSES
-//enum { FALSE, TRUE };
-//#endif
-
-#endif /* TYPES_H_ */
+#endif

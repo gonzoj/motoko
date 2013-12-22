@@ -29,6 +29,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
+#include <util/compat.h>
+
 #include <module.h>
 
 #include <d2gs.h>

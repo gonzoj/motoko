@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 gonzoj
+ * Copyright (C) 2013 gonzoj
  *
  * Please check the CREDITS file for further information.
  *
@@ -17,25 +17,24 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef TYPES_H_
-#define TYPES_H_
+#ifndef COMPAT_H_
+#define COMPAT_H_
 
-typedef unsigned char byte;
+#include <config.h>
 
-typedef unsigned short word;
+#ifndef HAVE_CLOCKID_T
 
-typedef unsigned int dword;
+typedef enum {
+	CLOCK_REALTIME,
+	CLOCK_MONOTONIC
+} clockid_t;
 
-#include <stdbool.h>
+#endif
 
-#undef FALSE
-#define FALSE false
+#ifndef HAVE_CLOCK_GETTIME
 
-#undef TRUE
-#define TRUE true
+int clock_gettime(clockid_t, struct timespec *);
 
-//#ifndef INCLUDE_NCURSES
-//enum { FALSE, TRUE };
-//#endif
+#endif
 
-#endif /* TYPES_H_ */
+#endif /* COMPAT_H_ */

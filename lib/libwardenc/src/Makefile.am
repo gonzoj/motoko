@@ -13,6 +13,7 @@ libwardenc_la_SOURCES = \
 	wutil.c \
 	wutil.h \
 	wtypes.h
-libwardenc_la_CFLAGS = -g -fvisibility=hidden -m32 -Wall
-libwardenc_la_CPPFLAGS = -I$(top_srcdir)/src -D_export="__attribute__((visibility(\"default\")))"
+libwardenc_la_CFLAGS = $(AM_CFLAGS) $(CFLAG_FVISIBILITY_HIDDEN)
+libwardenc_la_CPPFLAGS = $(CPPFLAG_DEXPORT)
 libwardenc_la_LDFLAGS = --version-info 0:0:0
+libwardenc_la_LIBADD = -lcrypto -lz

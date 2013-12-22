@@ -21,8 +21,11 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 #include <pthread.h>
+
+#include <util/compat.h>
 
 #include <module.h>
 
@@ -33,6 +36,7 @@
 #include <settings.h>
 #include <gui.h>
 
+#include <util/config.h>
 #include <util/list.h>
 #include <util/net.h>
 #include <util/string.h>
@@ -44,10 +48,13 @@ typedef void (*pthread_cleanup_handler_t)(void *);
 static struct setting module_settings[] = (struct setting []) {
 	SETTING("Difficulty", .s_var = "", STRING),
 	SETTING("LobbyIdleTime", 0, INTEGER),
-	SETTING("GameNamePass", .s_var = "", STRING)
+	SETTING("GameNamePass", .s_var = "", STRING),
+	SETTING("RotateCDKeys", FALSE, BOOLEAN),
+	SETTING("RotateAfterRuns", 1, INTEGER),
+	//SETTING("KeySetFile", .s_var = "", STRING)
 };
 
-static struct list module_settings_list = LIST(module_settings, struct setting, 3);
+static struct list module_settings_list = LIST(module_settings, struct setting, 5);
 
 #define module_setting(name) ((struct setting *)list_find(&module_settings_list, (comparator_t) compare_setting, name))
 
@@ -81,6 +88,19 @@ bool char_logon = FALSE;
 bool char_logon_signaled = FALSE;
 
 bool mcp_cleanup = FALSE;
+
+typedef struct keyset {
+	char expansion[27];
+	char classic[27];
+} keyset_t;
+
+#define keyset_new() (keyset_t) { 0 }
+
+static struct keyset *keyset;
+static int n_keyset;
+static int i_keyset;
+
+static bool rotated = FALSE;
 
 /* statistics */
 int n_created = 0;
@@ -132,6 +152,22 @@ _export module_type_t module_get_type() {
 
 _export bool module_load_config(struct setting_section *s) {
 	int i;
+	
+	if (!strcmp(s->name, "KeySet")) {
+		n_keyset++;
+		keyset = realloc(keyset, n_keyset * sizeof(keyset_t));
+		keyset[n_keyset - 1] = keyset_new();
+
+		for (i = 0; i < s->entries; i++) {
+			if (!strcmp(s->settings[i].name, "Expansion")) {
+				strncpy(keyset[n_keyset - 1].expansion, s->settings[i].s_var, sizeof(((keyset_t *)0)->expansion));
+			}
+			if (!strcmp(s->settings[i].name, "Classic")) {
+				strncpy(keyset[n_keyset - 1].classic, s->settings[i].s_var, sizeof(((keyset_t *)0)->classic));
+			}
+		}
+	}
+
 	for (i = 0; i < s->entries; i++) {
 		struct setting *set = module_setting(s->settings[i].name);
 		if (set) {
@@ -156,6 +192,28 @@ _export bool module_load_config(struct setting_section *s) {
 	return TRUE;
 }
 
+/*static void load_keyset_config(struct setting_section *s) {
+	if (strcmp(s->name, "KeySet")) {
+		return;
+	}
+
+	n_keyset++;
+	keyset = realloc(keyset, n_keyset * sizeof(keyset_t));
+	keyset[n_keyset - 1] = keyset_new();
+
+	int i;
+	for (i = 0; i < s->entries; i++) {
+		if (!strcmp(s->settings[i].name, "Expansion")) {
+			plugin_print("mcp game", "expansion: %s (%i)\n", s->settings[i].s_var, sizeof(((keyset_t *)0)->expansion));
+			strncpy(keyset[n_keyset - 1].expansion, s->settings[i].s_var, sizeof(((keyset_t *)0)->expansion));
+		}
+		if (!strcmp(s->settings[i].name, "Classic")) {
+			plugin_print("mcp game", "classic: %s\n", s->settings[i].s_var);
+			strncpy(keyset[n_keyset - 1].classic, s->settings[i].s_var, sizeof(((keyset_t *)0)->classic));
+		}
+	}
+}*/
+
 _export bool module_init() {
 	register_packet_handler(MCP_RECEIVED, 0x07, mcp_charlogon_handler);
 	register_packet_handler(MCP_RECEIVED, 0x03, mcp_creategame_handler);
@@ -171,6 +229,17 @@ _export bool module_init() {
 	} else {
 		game_diff = DIFF_NORMAL;
 	}
+
+
+	/*if (module_setting("RotateCDKeys")->b_var) {
+		if (config_load_settings(module_setting("KeySetFile")->s_var, load_keyset_config)) {
+			plugin_print("mcp game", "%i key sets from file %s loaded\n", n_keyset, module_setting("KeySetFile")->s_var);
+		} else {
+			plugin_error("mcp game", "failed to load key sets from file %s\n", module_setting("KeySetFile")->s_var);
+		}
+	}*/
+	if (n_keyset) plugin_print("mcp game", "loaded %i key sets\n", n_keyset);
+
 
 	return TRUE;
 }
@@ -191,6 +260,14 @@ _export bool module_finit() {
 
 	list_clear(&setting_cleaners);
 
+	if (keyset) {
+		free(keyset);
+		keyset = NULL;
+		n_keyset = 0;
+		i_keyset = 0;
+		rotated = FALSE;
+	}
+
 	pthread_cond_destroy(&game_created_cond_v);
 	pthread_cond_destroy(&game_joined_cond_v);
 	pthread_cond_destroy(&mcp_char_logon_cond_v);
@@ -210,6 +287,22 @@ _export bool module_finit() {
 	return TRUE;
 }
 
+static void switch_keys() {
+	rotated = TRUE;
+
+	if (n_keyset < 1) {
+		plugin_print("mcp game", "cannot switch CD key set (no key sets loaded)\n");
+		return;
+	}
+
+	i_keyset = (i_keyset + 1) % n_keyset;
+
+	plugin_print("mcp game", "switching to CD key set %i\n", i_keyset + 1);
+
+	strcpy(setting("ClassicKey")->s_var, keyset[i_keyset].classic);
+	strcpy(setting("ExpansionKey")->s_var, keyset[i_keyset].expansion);
+}
+
 _export void * module_thread(void *arg) {
 
 	pthread_mutex_lock(&mcp_char_logon_mutex);
@@ -221,6 +314,18 @@ _export void * module_thread(void *arg) {
 	pthread_mutex_unlock(&mcp_char_logon_mutex);
 
 	while (char_logon) {
+		if (module_setting("RotateCDKeys")->b_var && n_created && !(n_created % module_setting("RotateAfterRuns")->i_var) && !rotated) {
+			switch_keys();
+
+			plugin_print("mcp game", "requesting client restart\n");
+
+			internal_send(INTERNAL_REQUEST, "%d", CLIENT_RESTART);
+
+			pthread_exit(NULL);
+		}
+
+		rotated = FALSE;
+
 		plugin_print("mcp game", "sleeping for %i seconds\n", module_setting("LobbyIdleTime")->i_var);
 
 		struct timespec ts;
@@ -306,13 +411,14 @@ _export void * module_thread(void *arg) {
 
 		if (!game_joined) {
 			ftj++;
-			continue;
+			goto retry;
 		}
 
 		plugin_print("mcp game", "joined game %s / %s\n", game_name, game_pass, module_setting("Difficulty")->s_var);
 
 		pthread_cond_wait(&d2gs_engine_shutdown_cond_v, &d2gs_engine_shutdown_mutex);
 
+		retry:
 		pthread_cleanup_pop(1);
 	}
 

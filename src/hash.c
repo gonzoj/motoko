@@ -349,9 +349,10 @@ _export bool hash_executable(const char *bin_dir, const char *formula, const cha
 			free(file);
 			return FALSE;
 		}
-		byte buf[len];
+		byte *buf = malloc(len);
 		size_t total = file_read(file, buf, len);
 		if ((int) total < 0) {
+			free(buf);
 			free(file);
 			return FALSE;
 		}
@@ -363,6 +364,7 @@ _export bool hash_executable(const char *bin_dir, const char *formula, const cha
 			c = operators[2](c, a);
 			a = operators[3](a, b);
 		}
+		free(buf);
 		free(file);
 	}
 	*checksum = c;

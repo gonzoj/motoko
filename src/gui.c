@@ -34,9 +34,9 @@
 
 #include <util/curses.h>
 
-#define INCLUDE_NCURSES
+//#define INCLUDE_NCURSES
 #include <util/types.h>
-#undef INCLUDE_NCURSES
+//#undef INCLUDE_NCURSES
 
 #include <util/string.h>
 #include <util/system.h>
@@ -92,16 +92,18 @@ _export void ui_print(int c, char *format, ...) {
 
 	vprintf(format, args);
 
+	va_end(args);
+
 	// log this shit
 	if (setting("Logging")->b_var) {
 		FILE *log = fopen(logfile, "a");
 		if (log) {
+			va_start(args, format);
 			vfprintf(log, format, args);
+			va_end(args);
 			fclose(log);
 		}
 	}
-
-	va_end(args);
 
 	/*if (has_colors()) {
 		wattron(w, COLOR_PAIR(c + 1));
@@ -137,16 +139,18 @@ _export void ui_print_plugin(int c, char *p, char *format, ...) {
 
 	vprintf(format, args);
 
+	va_end(args);
+
 	if (setting("Logging")->b_var) {
 		FILE *log = fopen(logfile, "a");
 		if (log) {
 			fprintf(log, "[plugin %s] ", p);
+			va_start(args, format);
 			vfprintf(log, format, args);
+			va_end(args);
 			fclose(log);
 		}
 	}
-
-	va_end(args);
 
 	pthread_mutex_unlock(&console_mutex);
 }
@@ -165,16 +169,18 @@ _export void ui_print_debug(int c, char *format, ...) {
 
 	vprintf(format, args);
 
+	va_end(args);
+
 	if (setting("Logging")->b_var) {
 		FILE *log = fopen(logfile, "a");
 		if (log) {
 			fprintf(log, "DEBUG: ");
+			va_start(args, format);
 			vfprintf(log, format, args);
+			va_end(args);
 			fclose(log);
 		}
 	}
-
-	va_end(args);
 
 	pthread_mutex_unlock(&console_mutex);
 }
@@ -193,16 +199,18 @@ _export void ui_print_debug_plugin(int c, char *p, char *format, ...) {
 
 	vprintf(format, args);
 
+	va_end(args);
+
 	if (setting("Logging")->b_var) {
 		FILE *log = fopen(logfile, "a");
 		if (log) {
 			fprintf(log, "DEBUG: [plugin %s] ", p);
+			va_start(args, format);
 			vfprintf(log, format, args);
+			va_end(args);
 			fclose(log);
 		}
 	}
-
-	va_end(args);
 
 	pthread_mutex_unlock(&console_mutex);
 }

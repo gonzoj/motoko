@@ -19,7 +19,17 @@
 
 #define _PLUGIN
 
+#include <math.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <unistd.h>
+
+#include <util/compat.h>
+
 #include <module.h>
+
 #include <moduleman.h>
 #include <d2gs.h>
 #include <packet.h>
@@ -36,13 +46,6 @@
 
 #include <util/config.h>
 #include <util/system.h>
-
-#include <math.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
-#include <unistd.h>
 
 /* ---------------------------- */
 
@@ -100,6 +103,8 @@ static const char *s_npc_mod[] = {
 #define SQUARE(x) ((x) * (x))
 
 #define DISTANCE(a, b) ((int) sqrt((double) (SQUARE((a).x - (b).x) + SQUARE((a).y - (b).y))))
+
+#define MAX_WALKING_DISTANCE 35
 
 #define object_clear(o) memset(&(o), 0, sizeof(object_t))
 
@@ -964,7 +969,7 @@ int process_incoming_packet(void *p) {
 	return FORWARD_PACKET;
 }
 
-void moveto(int x, int y) {
+bool _moveto(int x, int y) {
 	//pthread_mutex_lock(&game_exit_m);
 	//pthread_cleanup_push((cleanup_handler) pthread_mutex_unlock, (void *) &game_exit_m);
 
@@ -974,6 +979,14 @@ void moveto(int x, int y) {
 
 	point_t p = { x, y };
 
+	int d = DISTANCE(bot.location, p);
+
+	if (d > MAX_WALKING_DISTANCE) {
+		plugin_print("pes", "got stuck trying to move to %i/%i (%i)\n", p.x, p.y, d);
+
+		return FALSE;
+	}
+
 	plugin_print("pes", "moving to %i/%i\n", (word) p.x, (word) p.y);
 
 	/*
@@ -982,7 +995,7 @@ void moveto(int x, int y) {
 	 * C -> S 0x03 | C-> S 0x69 | msleep()
 	 */
 
-	int t = DISTANCE(bot.location, p) * 80;
+	int t = d * 80;
 
 	//int t_s = t / 1000;
 	//int t_ns = (t - (t_s * 1000)) * 1000 * 1000;
@@ -1002,7 +1015,11 @@ void moveto(int x, int y) {
 	
 	//end:
 	//pthread_cleanup_pop(1);
+	
+	return TRUE;
 }
+
+#define moveto(x, y) if (!_moveto(x, y)) goto stuck
 
 void teleport(int x, int y) {
 	plugin_print("pes", "teleporting to %i/%i\n", x, y);
@@ -1322,8 +1339,14 @@ _export void * module_thread(void *unused) {
 		execute_module_schedule(MODULE_D2GS);
 	}
 
+	stuck:
+
 	// leave game
 	leave();
+
+	// clear bloody foothills
+	// monsters:
+	// enslaved, death mauler, 
 
 	pthread_exit(NULL);
 }

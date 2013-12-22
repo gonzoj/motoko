@@ -1,7 +1,4 @@
-SUBDIRS = ../lib/libwardenc
-
-includedir = @includedir@/@PACKAGE@
-nobase_include_HEADERS = \
+nobase_pkginclude_HEADERS = \
 	bncs.h \
 	clientman.h \
 	d2gs.h \
@@ -47,7 +44,7 @@ motoko_SOURCES = \
 	data/monster_names.h \
 	data/skills.h \
 	data/super_uniques.h
-motoko_CFLAGS = -g -fvisibility=hidden -m32 -Wall
-motoko_CPPFLAGS = -DBINDIR_TO_LIBDIR=\"@bin_to_lib@\" -DBINDIR_TO_DATADIR=\"@bin_to_data@\" -I$(top_srcdir)/src -I$(top_srcdir)/lib/libwardenc/src -I$(top_srcdir)/lib/util/include -D_export="__attribute__((visibility(\"default\")))"
-motoko_LDFLAGS = -rdynamic 
-LDADD = $(top_srcdir)/lib/libwardenc/src/libwardenc.la $(top_srcdir)/lib/util/libutil.la
+motoko_CFLAGS = $(AM_CFLAGS) $(CFLAG_FVISIBILITY_HIDDEN)
+motoko_CPPFLAGS = $(AM_CPPFLAGS) -I$(top_srcdir)/lib/libwardenc/src $(CPPFLAG_DEXPORT) -DPLUGINDIR=\"$(plugindir)\" -DCONFIGDIR=\"$(configdir)\"
+motoko_LDFLAGS = $(LDFLAG_RDYNAMIC)
+LDADD = -ldl -lpthread -lncurses $(top_srcdir)/lib/util/libutil.la $(LADD_LIBWARDENC)

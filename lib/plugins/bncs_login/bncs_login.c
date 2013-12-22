@@ -190,6 +190,10 @@ int bncs_auth_check_handler(void *p) {
 
 		plugin_error("bncs login", "error: CD key already in use by %s\n", info);
 
+		plugin_print("bncs login", "requesting client restart\n");
+
+		internal_send(INTERNAL_REQUEST, "%d", CLIENT_RESTART);
+
 		return FORWARD_PACKET;
 	}
 

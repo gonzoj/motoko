@@ -27,6 +27,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <config.h>
+
 #include "clientman.h"
 #include "d2gs.h"
 #include "moduleman.h"
@@ -38,11 +40,13 @@
 #include <util/net.h>
 #include <util/string.h>
 
+#ifdef USE_LIBWARDENC
 #include <wardenc.h>
+#endif
 
-static char bin_p[MAX_PATH];
+/*static char bin_p[MAX_PATH];
 static char lib_p[MAX_PATH];
-static char data_p[MAX_PATH];
+static char data_p[MAX_PATH];*/
 
 static char *home;
 _export char *profile;
@@ -64,10 +68,11 @@ static struct setting settings[] = (struct setting []) {
 	SETTING("Logging", FALSE, BOOLEAN),
 	SETTING("ReconnectDelay", 0, INTEGER),
 	SETTING("PluginBlacklist", .s_var = "", STRING),
-	SETTING("Debug", FALSE, BOOLEAN)
+	SETTING("Debug", FALSE, BOOLEAN),
+	SETTING("OnRestart", .s_var = "", STRING)
 };
 
-_export struct list settings_list = LIST(settings, struct setting, 17);
+_export struct list settings_list = LIST(settings, struct setting, 18);
 
 typedef void (*setting_cleaner_t)(struct setting *);
 
@@ -78,7 +83,7 @@ typedef struct {
 
 static struct list setting_cleaners = LIST(NULL, setting_cleanup_t, 0);
 
-static bool populate_paths(char *argv) {
+/*static bool populate_paths(char *argv) {
 	int len = readlink("/proc/self/exe", bin_p, MAX_PATH);
 	if (len < 0 || len >= MAX_PATH) {
 		if (strlen(argv) >= MAX_PATH || *argv != '/') {
@@ -120,7 +125,7 @@ static bool populate_paths(char *argv) {
 	}
 
 	return TRUE;
-}
+}*/
 
 static bool create_appdata() {
 	home = getenv("HOME");
@@ -135,15 +140,17 @@ static bool create_appdata() {
 				status |= mkdir(".motoko", S_IRWXU);
 				status |= mkdir(".motoko/profiles", S_IRWXU);
 				status |= mkdir(".motoko/profiles/default", S_IRWXU);
+#ifdef USE_LIBWARDENC
 				status |= mkdir(".motoko/warden", S_IRWXU);
 				status |= mkdir(".motoko/warden/modules", S_IRWXU);
+#endif
 				printf("%s\n", status ? "failed" : "done");
 
 				if (!status) {
 					char *binconf, *modconf, *warconf;
-					string_new(&binconf, data_p, "/motoko/motoko.conf.default", "");
-					string_new(&modconf, data_p, "/motoko/plugin.conf.default", "");
-					string_new(&warconf, data_p, "/motoko/wrequest.db.default", "");
+					string_new(&binconf, CONFIGDIR, "/motoko/motoko.conf.default", "");
+					string_new(&modconf, CONFIGDIR, "/motoko/plugin.conf.default", "");
+					string_new(&warconf, CONFIGDIR, "/motoko/wrequest.db.default", "");
 				
 					printf("copying motoko.conf... ");
 					status |= (int) file_copy(binconf, ".motoko/profiles/default/motoko.conf") < 0 ? -1 : 0;
@@ -151,9 +158,11 @@ static bool create_appdata() {
 					printf("copying plugin.conf... ");
 					status |= (int) file_copy(modconf, ".motoko/profiles/default/plugin.conf") < 0 ? -1 : 0;
 					printf("%s\n", status ? "failed" : "done");
+#ifdef USE_LIBWARDENC
 					printf("copying wrequest.db... ");
 					status |= (int) file_copy(warconf, ".motoko/warden/wrequest.db") < 0 ? -1 : 0;
 					printf("%s\n", status ? "failed" : "done");
+#endif
 
 					free(binconf);
 					free(modconf);
@@ -244,6 +253,7 @@ static void process_config(struct setting_section *s) {
 }
 
 // WARDENC
+#ifdef USE_LIBWARDENC
 static wardenc_callbacks imports = {
 		d2gs_get_hash,
 		d2gs_send_raw,
@@ -258,6 +268,7 @@ static void wardenc_dump_packet(byte *packet, size_t len) {
 }
 
 static char warden_p[MAX_PATH];
+#endif
 
 static bool sigint = FALSE;
 
@@ -271,10 +282,10 @@ int main(int argc, char *argv[]) {
 
 	int status = 0;
 
-	if (!populate_paths(argv[0])) {
+	/*if (!populate_paths(argv[0])) {
 		printf("failed to resolve locations of necessary data. program exits.\n");
 		exit(EXIT_FAILURE);
-	}
+	}*/
 
 	if (create_appdata()) {
 		exit(EXIT_FAILURE);
@@ -309,7 +320,7 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	status |= chdir(lib_p);
+	/*status |= chdir(lib_p);
 	if (chdir("motoko/plugins") != 0) {
 		printf("failed to locate the directory for plugins. program exits.\n");
 		exit(EXIT_FAILURE);
@@ -318,10 +329,11 @@ int main(int argc, char *argv[]) {
 	if (!getcwd(mod_p, MAX_PATH)) {
 		printf("failed to resolve path to the plugins directory. program exits.\n");
 		exit(EXIT_FAILURE);
-	}
+	}*/
 
 	status |= chdir(home);
 
+#ifdef USE_LIBWARDENC
 	if (chdir(".motoko/warden") != 0) {
 		printf("directory for the warden client engine doesn't exist. program exits.\n");
 		exit(EXIT_FAILURE);
@@ -339,6 +351,11 @@ int main(int argc, char *argv[]) {
 	}
 
 	status |= chdir(home);
+#else
+	if (setting("ResponseWarden")->b_var) {
+		printf("warning: you specified 'ResponseWarden = yes' but motoko was built without warden support.");
+	}
+#endif
 	status |= chdir(".motoko/profiles");
 	status |= chdir(profile);
 
@@ -348,7 +365,7 @@ int main(int argc, char *argv[]) {
 
 	init_packet_handler_list();
 
-	load_modules(mod_p);
+	load_modules(PLUGINDIR);
 
 	start_client_manager();
 

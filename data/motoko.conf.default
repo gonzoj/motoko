@@ -50,3 +50,6 @@ PluginBlacklist = ""
 
 # Enables / disables debug output (yes / no)
 Debug = no
+
+# Shell command(s) to execute on client restart
+OnRestart = ""

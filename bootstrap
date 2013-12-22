@@ -1,0 +1,12 @@
+#!/bin/sh
+
+echo "bootstrap (motoko): creating automake config directories"
+mkdir -p config/m4 || exit 1
+
+echo "bootstrap (motoko): creating automake config directories for libwardenc"
+mkdir -p lib/libwardenc/config/m4 || exit 1
+
+echo "bootstrap (motoko): generating autotools files"
+autoreconf --verbose --force --install || exit 1
+
+echo "bootstrap (motoko): success"

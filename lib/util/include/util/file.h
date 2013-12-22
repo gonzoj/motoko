@@ -33,7 +33,7 @@ size_t file_get_size(const char *);
 
 size_t file_read(const char *, byte *, size_t);
 
-size_t file_read(const char *, byte *, size_t);
+size_t file_write(const char *, byte *, size_t);
 
 size_t file_dump(const char *file, char *format, ...);
 
