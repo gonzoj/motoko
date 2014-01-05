@@ -504,15 +504,19 @@ item_t * item_new(d2gs_packet_t *packet, item_t *new) {
 	if ((new->destination == 0x03) && ((new->quality == 0x02) || (new->quality == 0x03)) && net_extract_bits(packet->data, 67, 1)) { // has sockets
 		// bit 179: has graphic
 		int i = 179;
-		if (net_extract_bits(packet->data, i++, 1)) i += 3;
-		//i++;
-		if (net_extract_bits(packet->data, i++, 1)) i += 11;
-		//i++;
-		if (new->quality == 0x03) i += 3;
+		if (net_extract_bits(packet->data, i++, 1)) {
+			i += 3;
+		}
+		if (net_extract_bits(packet->data, i++, 1)) {
+			i += 11;
+		}
+		if (new->quality == 0x03) i += 3; // superiority type
 		// if armor skip 11; use item category byte (probably not as acurate as checking item code)
-		if (net_extract_bits(packet->data, 8, 8) != 0x05 && net_extract_bits(packet->data, 8, 8) != 0x06) i += 11;
-		i += 8;
-		if (strcmp(new->code, "7cr")) i += 9;
+		if ((net_extract_bits(packet->data, 16, 8) != 0x05) && (net_extract_bits(packet->data, 16, 8) != 0x06)) {
+			i += 11; // defense
+		}
+		i += 8; // max durability
+		if (strcmp(new->code, "7cr")) i += 9; // durability
 		new->sockets = net_extract_bits(packet->data, i, 4);
 	} else {
 		new->sockets = 0;
