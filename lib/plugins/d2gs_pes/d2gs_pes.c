@@ -865,6 +865,15 @@ int process_incoming_packet(void *p) {
 		break;
 	}
 
+	case 0x26: {
+		if (net_get_data(packet->data, 0, byte) == 0x05) break;
+
+		char *player = (char *) (packet->data + 9);
+		char *message = (char *) (packet->data + 9 + strlen(player) + 1);
+		plugin_print("pes", "%s says: \"%s\"\n", player, message);
+		break;
+	}
+
 	case 0x27: {
 		pthread_mutex_lock(&npc_interact_mutex);
 		pthread_cond_signal(&npc_interact_cv);
@@ -878,7 +887,7 @@ int process_incoming_packet(void *p) {
 			rp.location.x = net_get_data(packet->data, 7, word);
 			rp.location.y = net_get_data(packet->data, 9, word);
 
-			plugin_debug("oes", "detected red portal at %i/%i\n", rp.location.x, rp.location.y);
+			plugin_debug("pes", "detected red portal at %i/%i\n", rp.location.x, rp.location.y);
 		}
 		if (net_get_data(packet->data, 0, byte) == 0x02 && net_get_data(packet->data, 5, word) == 0x1ad) {
 			wp.id = net_get_data(packet->data, 1, dword);
@@ -1465,6 +1474,7 @@ _export bool module_init() {
 	register_packet_handler(D2GS_RECEIVED, 0x0c, process_incoming_packet);
 	register_packet_handler(D2GS_RECEIVED, 0x69, process_incoming_packet);
 	register_packet_handler(D2GS_RECEIVED, 0x6d, process_incoming_packet);
+	register_packet_handler(D2GS_RECEIVED, 0x26, process_incoming_packet);
 
 	register_packet_handler(D2GS_SENT, 0x01, d2gs_char_location_update);
 	register_packet_handler(D2GS_SENT, 0x03, d2gs_char_location_update);
@@ -1514,6 +1524,7 @@ _export bool module_finit() {
 	unregister_packet_handler(D2GS_RECEIVED, 0x0c, process_incoming_packet);
 	unregister_packet_handler(D2GS_RECEIVED, 0x69, process_incoming_packet);
 	unregister_packet_handler(D2GS_RECEIVED, 0x6d, process_incoming_packet);
+	unregister_packet_handler(D2GS_RECEIVED, 0x26, process_incoming_packet);
 
 	unregister_packet_handler(D2GS_SENT, 0x01, d2gs_char_location_update);
 	unregister_packet_handler(D2GS_SENT, 0x03, d2gs_char_location_update);
