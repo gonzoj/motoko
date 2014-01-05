@@ -39,6 +39,8 @@
 # GameNamePass: sets name and password to use (options: random, 'name'/'password')
 # RotateCDKeys: specifies whether CD keys should be switched after a given amount of runs (options: yes, no)
 # RotateAfterRuns: specifies the amount of runs after which CD keys will be switched
+# GameLimitPerHour: specifies the maximum amount of games to create within an hour (0 to disable)
+# JoinPublicGames: whether to avoid creating games when there are public games available for farming (options: yes, no)
 #
 # to include a classic/expansion CD key pair in the rotation define a <KeySet type=nested></KeySet> entry
 
@@ -49,6 +51,8 @@
 	GameNamePass = game/pass
 	RotateCDKeys = no
 	RotateAfterRuns = 20
+	GameLimitPerHour = 0
+	JoinPublicGames = no
 	<KeySet type=nested>
 		Classic = AAAAAAAAAAAAAAAA
 		Expansion = BBBBBBBBBBBBBBBB
@@ -63,6 +67,8 @@
 # MPPotionLimit: specifies when to use a mana pot
 # MPChickenLimit: specifies when to chicken due to mana level
 # ForceExitDelay: specifies the delay before forcing a disconnect when no game exit acknowledgement is received (milliseconds)
+# OnHostile: specifies whether to chicken on hostile (options: yes, no)
+# PingChickenLimit: specifies when to chicken due to latency (0 to disable)
 
 <Plugin type=nested>
 	Name = d2gs_chicken
@@ -71,6 +77,8 @@
 	MPPotionLimit = 150
 	MPChickenLimit = 50
 	ForceExitDelay = 500
+	OnHostile = yes
+	PingChickenLimit = 0
 </Plugin>
 
 # plugin pickit
@@ -87,8 +95,6 @@
 #  Amount: minimum amount needed (only useful for gold at the moment, any other item has amount 1)
 #  Log: specifies whether to log the pick to pickit.log (options: yes, no)
 #  Sockets: number of sockets (only works for normal and superior quality)
-#
-# NOTE: socket attribute does not work correctly yet; DO NOT USE UNTIL FIXED
 
 <Plugin type=nested>
 	Name = d2gs_pickit
@@ -114,7 +120,7 @@
 		Code = 7vo
 		Quality = superior
 		Ethereal = yes
-		#Sockets = 4
+		Sockets = 4
 	</Item>
 	<Item type=nested>
 		Log = no
