@@ -22,6 +22,9 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
+
+#include <util/compat.h>
 
 #include <module.h>
 
@@ -33,6 +36,7 @@
 
 #include <util/net.h>
 #include <util/list.h>
+#include <util/string.h>
 #include <util/system.h>
 #include <util/types.h>
 
@@ -43,10 +47,12 @@ static struct setting module_settings[] = (struct setting []) {
 	SETTING("MPPotionLimit", 0, INTEGER),
 	SETTING("HPChickenLimit", 0, INTEGER),
 	SETTING("MPChickenLimit", 0, INTEGER),
-	SETTING("ForceExitDelay", 0, INTEGER)
+	SETTING("ForceExitDelay", 0, INTEGER),
+	SETTING("OnHostile", FALSE, BOOLEAN),
+	SETTING("PingChickenLimit", 0, INTEGER)
 };
 
-static struct list module_settings_list = LIST(module_settings, struct setting, 5);
+static struct list module_settings_list = LIST(module_settings, struct setting, 7);
 
 #define module_setting(name) ((struct setting *)list_find(&module_settings_list, (comparator_t) compare_setting, name))
 
@@ -77,6 +83,8 @@ static pthread_cond_t chicken_cv;
 static bool exit_game;
 static bool exit_ack;
 
+static struct timespec ping_ts;
+
 int d2gs_char_update(void *);
 int d2gs_belt_update(void *);
 int d2gs_shop_update(void *);
@@ -84,6 +92,8 @@ int d2gs_on_npc_interact(void *);
 int d2gs_on_npc_quit(void *);
 int d2gs_on_exit_ack(void *);
 int internal_on_module_cleanup(internal_packet_t *);
+int d2gs_on_event_message(void *);
+int d2gs_on_ping(void *);
 
 _export const char * module_get_title() {
 	return "chicken";
@@ -115,7 +125,11 @@ _export bool module_load_config(struct setting_section *s) {
 		struct setting *set = module_setting(s->settings[i].name);
 		if (set) {
 			if (s->settings[i].type == STRING) {
-				sscanf(s->settings[i].s_var, "%li",  &set->i_var);
+				if (set->type == BOOLEAN) {
+					set->b_var = !strcmp(string_to_lower_case(s->settings[i].s_var), "yes");
+				} else if (set->type == INTEGER) {
+					sscanf(s->settings[i].s_var, "%li",  &set->i_var);
+				}
 			}
 		}
 	}
@@ -131,6 +145,9 @@ _export bool module_init() {
 	register_packet_handler(D2GS_SENT, 0x30, d2gs_on_npc_quit);
 	register_packet_handler(D2GS_RECEIVED, 0x06, d2gs_on_exit_ack);
 	register_packet_handler(INTERNAL, D2GS_ENGINE_MESSAGE, (packet_handler_t) internal_on_module_cleanup);
+	register_packet_handler(D2GS_RECEIVED, 0x5a, d2gs_on_event_message);
+	register_packet_handler(D2GS_SENT, 0x6d, d2gs_on_ping);
+	register_packet_handler(D2GS_RECEIVED, 0x8f, d2gs_on_ping);
 
 	belt = list_new(potion_t);
 
@@ -163,7 +180,9 @@ _export bool module_finit() {
 	unregister_packet_handler(D2GS_SENT, 0x30, d2gs_on_npc_quit);
 	unregister_packet_handler(D2GS_RECEIVED, 0x06, d2gs_on_exit_ack);
 	unregister_packet_handler(INTERNAL, D2GS_ENGINE_MESSAGE, (packet_handler_t) internal_on_module_cleanup);
-
+	unregister_packet_handler(D2GS_RECEIVED, 0x5a, d2gs_on_event_message);
+	unregister_packet_handler(D2GS_SENT, 0x6d, d2gs_on_ping);
+	unregister_packet_handler(D2GS_RECEIVED, 0x8f, d2gs_on_ping);
 
 	list_clear(&belt);
 
@@ -460,6 +479,51 @@ int d2gs_on_exit_ack(void *p) {
 	exit_ack = TRUE;
 
 	pthread_mutex_unlock(&chicken_m);
+
+	return FORWARD_PACKET;
+}
+
+int d2gs_on_event_message(void *p) {
+	d2gs_packet_t *packet = D2GS_CAST(p);
+
+	if (net_get_data(packet->data, 0, byte) == 0x07 && net_get_data(packet->data, 1, byte) == 0x08) {
+		plugin_print("chicken", "a player has gone hostile\n");
+
+		if (module_setting("OnHostile")->b_var) {
+			leave_game();
+
+			plugin_print("chicken", "chicken (hostile)\n");
+		}
+	}
+
+	return FORWARD_PACKET;
+}
+
+int d2gs_on_ping(void *p) {
+	d2gs_packet_t *packet = D2GS_CAST(p);
+
+	switch (packet->id) {
+		case 0x6d: {
+			clock_gettime(CLOCK_REALTIME, &ping_ts);
+			break;
+		}
+		case 0x8f: {
+			struct timespec pong_ts;
+			clock_gettime(CLOCK_REALTIME, &pong_ts);
+
+			int latency = (pong_ts.tv_sec - ping_ts.tv_sec) * 1000 + (pong_ts.tv_nsec - ping_ts.tv_nsec) / 1000000;
+
+			if (module_setting("PingChickenLimit")->i_var && (latency > module_setting("PingChickenLimit")->i_var)) {
+				leave_game();
+
+				plugin_print("chicken", "chicken (ping: %i ms)\n", latency);
+			} else if (latency > 300) {
+				plugin_print("chicken", "warning: high latency to game server (%i ms)\n", latency);
+			}
+			plugin_debug("chicken", "latency: %i ms\n", latency);
+			break;
+		}
+	}
 
 	return FORWARD_PACKET;
 }
