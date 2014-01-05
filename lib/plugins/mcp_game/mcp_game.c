@@ -51,10 +51,12 @@ static struct setting module_settings[] = (struct setting []) {
 	SETTING("GameNamePass", .s_var = "", STRING),
 	SETTING("RotateCDKeys", FALSE, BOOLEAN),
 	SETTING("RotateAfterRuns", 1, INTEGER),
+	SETTING("GameLimitPerHour", 0, INTEGER),
+	SETTING("JoinPublicGames", FALSE, BOOLEAN)
 	//SETTING("KeySetFile", .s_var = "", STRING)
 };
 
-static struct list module_settings_list = LIST(module_settings, struct setting, 5);
+static struct list module_settings_list = LIST(module_settings, struct setting, 7);
 
 #define module_setting(name) ((struct setting *)list_find(&module_settings_list, (comparator_t) compare_setting, name))
 
@@ -102,8 +104,26 @@ static int i_keyset;
 
 static bool rotated = FALSE;
 
+static time_t start_t;
+static int n_gph = 0;
+
+typedef struct game {
+	dword index;
+	byte players;
+	char name[15];
+	char desc[100];
+	bool joined;
+	bool active;
+} game_t;
+
+static struct list public_games = LIST(NULL, game_t, 0);
+
+static pthread_cond_t pub_cv = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t pub_m = PTHREAD_MUTEX_INITIALIZER;
+
 /* statistics */
 int n_created = 0;
+int n_joined = 0;
 int ftj = 0;
 
 pthread_cond_t game_created_cond_v = PTHREAD_COND_INITIALIZER;
@@ -125,6 +145,8 @@ int mcp_joingame_handler(void *p);
 int on_d2gs_shutdown(void *p);
 
 int on_mcp_cleanup(void *p);
+
+int mcp_gamelist_handler(void *p);
 
 _export const char * module_get_title() {
 	return "mcp game";
@@ -222,6 +244,8 @@ _export bool module_init() {
 
 	register_packet_handler(INTERNAL, MCP_ENGINE_MESSAGE, on_mcp_cleanup);
 
+	register_packet_handler(MCP_RECEIVED, 0x05, mcp_gamelist_handler);
+
 	if (!strcmp(string_to_lower_case(module_setting("Difficulty")->s_var), "hell")) {
 		game_diff = DIFF_HELL;
 	} else if (!strcmp(string_to_lower_case(module_setting("Difficulty")->s_var), "nightmare")) {
@@ -240,6 +264,7 @@ _export bool module_init() {
 	}*/
 	if (n_keyset) plugin_print("mcp game", "loaded %i key sets\n", n_keyset);
 
+	start_t = time(NULL);
 
 	return TRUE;
 }
@@ -251,6 +276,8 @@ _export bool module_finit() {
 	unregister_packet_handler(INTERNAL, D2GS_ENGINE_MESSAGE, on_d2gs_shutdown);
 
 	unregister_packet_handler(INTERNAL, MCP_ENGINE_MESSAGE, on_mcp_cleanup);
+
+	unregister_packet_handler(MCP_RECEIVED, 0x05, mcp_gamelist_handler);
 
 	struct iterator it = list_iterator(&setting_cleaners);
 	setting_cleanup_t *sc;
@@ -281,10 +308,119 @@ _export bool module_finit() {
 	pthread_mutex_destroy(&mcp_cleanup_m);
 	pthread_cond_destroy(&mcp_cleanup_cv);
 
+	pthread_mutex_destroy(&pub_m);
+	pthread_cond_destroy(&pub_cv);
+
+	list_clear(&public_games);
+
 	ui_add_statistics_plugin("mcp game", "games created: %i\n", n_created);
+	if (module_setting("JoinPublicGames")->b_var) ui_add_statistics_plugin("mcp game", "public games joined: %i\n", n_joined);
 	ui_add_statistics_plugin("mcp game", "failed to join: %i (%i%%)\n", ftj, PERCENT(n_created, ftj));
 
 	return TRUE;
+}
+
+static void dump_game_list(struct list *l) {
+	ui_console_lock();
+	plugin_print("mcp game", "public games available (%i):\n\n", list_size(&public_games));
+
+	game_t *g;
+	struct iterator it = list_iterator(l);
+	while ((g = iterator_next(&it))) {
+		print("%s%s (%i player%s)%s%s\n", g->joined ? "* " : "", g->name, g->players, g->players != 1 ? "s" : "", strlen(g->desc) ? ": " : "", strlen(g->desc) ? g->desc : "");
+	}
+	if (list_empty(l)) print("(none)\n");
+	print("\n");
+
+	ui_console_unlock();
+}
+
+static void request_game_list(const char *s) {
+	game_t *g;
+
+	struct iterator it = list_iterator(&public_games);
+	while ((g = iterator_next(&it))) {
+		g->active = FALSE;
+	}
+
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	ts.tv_sec += 2;
+
+	pthread_mutex_lock(&pub_m);
+
+	mcp_send(0x05, "%w 00 00 00 00 %s 00", request_id, s);
+	request_id++;
+
+	pthread_cond_timedwait(&pub_cv, &pub_m, &ts);
+
+	it = list_iterator(&public_games);
+	while ((g = iterator_next(&it))) {
+		if (!g->active) {
+			iterator_remove(&it);
+			plugin_debug("mcp game", "removing inactive game\n");
+		}
+	}
+
+	dump_game_list(&public_games);
+
+	pthread_mutex_unlock(&pub_m);
+}
+
+int compare_game_index(game_t *a, game_t *b) {
+	return a->index == b->index;
+}
+
+int compare_game_name(game_t *a, char *name) {
+	return !strcmp(a->name, name);
+}
+
+int mcp_gamelist_handler(void *p) {
+	mcp_packet_t *packet = MCP_CAST(p);
+
+	game_t g;
+
+	g.index = net_get_data(packet->data, 2, dword);
+	g.players  = net_get_data(packet->data, 6, byte);
+	net_extract_string(packet->data, g.name, 11);
+	net_extract_string(packet->data, g.desc, 11 + strlen(g.name) + 1);
+
+	pthread_mutex_lock(&pub_m);
+
+	game_t *_g;
+	if ((_g = list_find(&public_games, (comparator_t) compare_game_index, &g))) {
+		_g->players = g.players;
+		_g->active = TRUE;
+		plugin_debug("mcp game", "refreshing game info\n");
+	} else {
+		g.joined = FALSE;
+		g.active = TRUE;
+		
+		if (g.index) {
+			list_add(&public_games, &g);
+
+			plugin_debug("mcp game", "new game in game list\n");
+		} else {
+			plugin_debug("mcp game", "end of game list received\n");
+
+			pthread_cond_signal(&pub_cv);
+		}
+	}
+
+	pthread_mutex_unlock(&pub_m);
+
+	return FORWARD_PACKET;
+}
+
+game_t * get_new_public_game() {
+	game_t *g;
+
+	struct iterator it = list_iterator(&public_games);
+	while ((g = iterator_next(&it))) {
+		if (!g->joined) return g;
+	}
+
+	return NULL;
 }
 
 static void switch_keys() {
@@ -351,6 +487,34 @@ _export void * module_thread(void *arg) {
 		game_created = FALSE;
 		game_joined = FALSE;
 
+		if (module_setting("JoinPublicGames")->b_var) {
+			request_game_list("");
+		}
+
+		if (module_setting("JoinPublicGames")->b_var) {
+			pthread_mutex_lock(&pub_m);
+
+			game_t *g = get_new_public_game();
+			if (g) {
+				strncpy(game_name, g->name, 15);
+				strncpy(game_pass, "", 15);
+				n_joined++;
+			}
+
+			pthread_mutex_unlock(&pub_m);
+		} else {
+		if (difftime(time(NULL), start_t) < 3600) {
+			if (module_setting("GameLimitPerHour")->i_var > 0 && (n_gph > module_setting("GameLimitPerHour")->i_var)) {
+				plugin_print("mcp game", "game limit per hour reached (%i)\n", module_setting("GameLimitPerHour")->i_var);
+				continue;
+			} else {
+				n_gph++;
+			}
+		} else {
+			start_t = time(NULL);
+			n_gph = 0;
+		}
+
 		if (string_compare(module_setting("GameNamePass")->s_var, "random", FALSE) || !strlen(module_setting("GameNamePass")->s_var)) {
 			string_random(15, 'a', 26, game_name);
 			string_random(15, 'a', 26, game_pass);
@@ -385,10 +549,13 @@ _export void * module_thread(void *arg) {
 		}
 
 		request_id++;
-		mcp_responsed = FALSE;
+		//mcp_responsed = FALSE;
 		n_created++;
 
 		plugin_print("mcp game", "created game %s / %s (%s)\n", game_name, game_pass, module_setting("Difficulty")->s_var);
+		}
+
+		mcp_responsed = FALSE;
 
 		pthread_mutex_lock(&d2gs_engine_shutdown_mutex);
 		pthread_cleanup_push((pthread_cleanup_handler_t) pthread_mutex_unlock, (void *) &d2gs_engine_shutdown_mutex);
@@ -414,7 +581,7 @@ _export void * module_thread(void *arg) {
 			goto retry;
 		}
 
-		plugin_print("mcp game", "joined game %s / %s\n", game_name, game_pass, module_setting("Difficulty")->s_var);
+		plugin_print("mcp game", "joined game %s%s%s\n", game_name, strlen(game_pass) ? " / " : "", game_pass);
 
 		pthread_cond_wait(&d2gs_engine_shutdown_cond_v, &d2gs_engine_shutdown_mutex);
 
@@ -551,6 +718,10 @@ int mcp_joingame_handler(void *p) {
 		plugin_print("mcp game", "successfully joined game\n");
 
 		game_joined = TRUE;
+
+		game_t *g;
+		if ((g = list_find(&public_games, (comparator_t) compare_game_name, game_name))) g->joined = TRUE;
+
 		break;
 	}
 
